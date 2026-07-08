@@ -116,18 +116,27 @@ export default function Home() {
 
   // --- FUNCIÓN: DESCARGAR TXT ---
   const descargarTxt = () => {
-    // Unimos el array limpio con un salto de línea puro (\r\n para mayor compatibilidad)
-    const contenido = codigosExtraidos.join('\r\n');
+    try {
+      if (!codigosExtraidos || codigosExtraidos.length === 0) return;
 
-    const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `codigos_${codigoPadre}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      // Unimos el array limpio con un salto de línea puro (\r\n para mayor compatibilidad)
+      const contenido = codigosExtraidos.join('\r\n');
+
+      const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      // Usamos setAttribute que es más fiable a la hora de forzar la descarga en React
+      link.setAttribute('download', `codigos_${codigoPadre}.txt`);
+      document.body.appendChild(link);
+      link.click();
+
+      // Limpieza
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error("Error al descargar el archivo:", e);
+    }
   };
 
   // --- FUNCIONES DEL EXTRACTOR ---
@@ -540,23 +549,32 @@ export default function Home() {
                     >
                       <span className="text-xl">📄</span>
                       <span>Descargar Word (.docx)</span>
-                    </button>
-                  </div>
+                      </button>
+                    </div>
 
-                  <div className="border border-slate-200 rounded-lg">
-                    <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
-                      Vista previa de enunciados (HTML extraído)
-                    </div>
-                    <div className="p-4 h-64 overflow-y-auto bg-slate-50/50 text-sm text-slate-600 space-y-3">
-                      {enunciadosExtraidos.map((item, idx) => (
-                        <div key={idx} className="p-3 bg-white border border-slate-200 rounded-md">
-                          <span className="font-bold text-[#2a40b3] block mb-1">{item.codigo}</span>
-                          <code className="text-xs text-slate-500 break-words">{item.enunciadoHtml}</code>
-                        </div>
-                      ))}
+                    <div className="border border-slate-200 rounded-lg">
+                      <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
+                        Vista previa de enunciados (HTML extraído)
+                      </div>
+                      <div className="p-4 h-96 overflow-y-auto bg-slate-50 text-sm text-slate-600 space-y-4 shadow-inner">
+                        {enunciadosExtraidos.map((item, idx) => (
+                          <div key={idx} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-emerald-300 transition-colors">
+                            <span className="font-bold text-[#2a40b3] block mb-3 border-b border-slate-100 pb-2">
+                              {item.codigo}
+                            </span>
+
+                            {/* Renderizado de HTML real eliminando las etiquetas <img> */}
+                            <div
+                              className="text-sm text-slate-700 prose prose-sm max-w-none [&_p]:m-0 [&_p]:mb-1"
+                              dangerouslySetInnerHTML={{
+                                __html: item.enunciadoHtml ? item.enunciadoHtml.replace(/<img[^>]*>/g, '') : ''
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
-                </div>
               ) : (
                 // PANTALLA DE REPOSO
                 <div className="border-2 border-dashed border-slate-200 rounded-lg h-64 flex flex-col items-center justify-center text-slate-400">

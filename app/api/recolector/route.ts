@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   // Creamos un "Tubo de transmisión en vivo" (ReadableStream)
   const stream = new ReadableStream({
     async start(controller) {
-      
+
       // Funciones auxiliares para enviar datos por el "tubo"
       const sendLog = (msg: string) => {
         controller.enqueue(encoder.encode(JSON.stringify({ type: 'log', message: msg }) + '\n'));
@@ -26,11 +26,19 @@ export async function POST(request: Request) {
 
       try {
         sendLog(`[🤖] Iniciando motor de recolección para: ${codigo_libro}...`);
-        
+
         // 1. Iniciamos el navegador
-        const browser = await chromium.launch({ headless: true });
+        const browser = await chromium.launch({
+          headless: true, // Ponlo en false si quieres ver el navegador trabajando
+          args: [
+            '--no-sandbox',                
+            '--disable-setuid-sandbox',    
+            '--disable-dev-shm-usage',    
+            '--disable-gpu'                
+          ]
+        });
         sendLog(`[🔌] Navegador virtual iniciado en segundo plano.`);
-        
+
         const context = await browser.newContext({
           locale: 'es-ES',
           timezoneId: 'Europe/Madrid',
@@ -41,75 +49,59 @@ export async function POST(request: Request) {
         // --- NAVEGACIÓN Y LOGIN ---
         sendLog(`[🔐] Accediendo a la plataforma y verificando credenciales...`);
         await page.goto(`${url_base}/auth/login`);
-        
+
         await page.locator('input[type="text"], input[type="email"], input[name="username"]').first().fill(usuario);
         await page.locator('input[type="password"], input[name="password"]').first().fill(contrasena);
         await page.locator('button[type="submit"], button:has-text("Iniciar sesión"), button:has-text("Login")').first().click();
-        
+
         await page.waitForLoadState("networkidle");
-        
-        // Ir a Contenidos
-        sendLog(`[📂] Credenciales correctas. Navegando al gestor de Contenidos...`);
+
+        // Ir a Contenidos y luego a la pestaña de Actividades
+        sendLog(`[📂] Navegando a la sección de Actividades...`);
         await page.locator('div[aria-label="Contenidos"]').first().click();
         await page.waitForTimeout(1000);
-        await page.locator('.wrapper-list-menu__item a[href="/contents"]').first().click();
+        
+        await page.locator('a[href="/contents/activities"]').first().click();
         await page.waitForLoadState("networkidle");
         await page.waitForTimeout(1500);
-        
+
         // 3. BUSCAMOS EL LIBRO
         sendLog(`[🔎] Escribiendo código padre en el buscador interno...`);
         const buscador = page.locator('input[data-testid="search"]');
-        await buscador.fill(""); 
+        await buscador.fill("");
         await buscador.fill(codigo_libro);
         await buscador.press("Enter");
-        
+
         await page.waitForLoadState("networkidle");
         await page.waitForTimeout(3000);
 
-        // 4. APLICAMOS EL FILTRO
-        sendLog(`[⚙️] Configurando filtro estricto de 'Question'...`);
-        try {
-          await page.locator('.input-search-filter__button').first().click();
-          await page.waitForTimeout(1000);
-          await page.locator('[id="Tipo de contenido"]').first().click();
-          await page.waitForTimeout(1000);
-          
-          const checkbox = page.locator('label:has-text("Question") input[type="checkbox"]').first();
-          if (!(await checkbox.isChecked())) {
-            await page.locator('label:has-text("Question")').first().click();
-            await page.waitForTimeout(500);
-          }
-          
-          await page.locator('button[aria-label="Aplicar filtros"]').first().click();
-          await page.waitForLoadState("networkidle");
-          await page.waitForTimeout(2000);
-        } catch (e) {
-          sendLog(`[⚠️] El filtro 'Question' ya estaba aplicado o no es visible.`);
-        }
+        // (ELIMINADO EL PASO 4 DE FILTROS. VAMOS DIRECTO A RECOLECTAR)
 
-        const codigosRecolectados = new Set<string>(); 
+        const codigosRecolectados = new Set<string>();
         let paginaActual = 1;
-        
+
         // --- BUCLE DE RECOLECCIÓN ---
         while (true) {
           sendLog(`[📖] Analizando página ${paginaActual} de resultados...`);
-          
-          const elementos = await page.locator('tr:has(td:has-text("Question")) .table-body-cell-edit a').all();
-          
+
+        // Recogemos SOLO el primer <span> dentro del enlace en la nueva estructura de la tabla
+          const elementos = await page.locator('.table-body-cell-subtitle a span:first-child').all();
+
           if (elementos.length === 0) {
             sendLog(`[ℹ️] No hay elementos en la página ${paginaActual}. Terminado.`);
-            break; 
+            break;
           }
-            
+
           for (const el of elementos) {
             const codigo = await el.innerText();
+            // Validamos que realmente tenga contenido antes de añadirlo
             if (codigo.trim()) {
               codigosRecolectados.add(codigo.trim());
             }
           }
-          
+
           const btnSiguiente = page.locator('button[aria-label="Go to next page"], button[aria-label="Ir a la página siguiente"], ul.MuiPagination-ul li:last-child button').first();
-          
+
           const isVisible = await btnSiguiente.isVisible();
           if (!isVisible) {
             sendLog(`[✅] Solo existe una página. Recolección finalizada.`);
@@ -121,22 +113,22 @@ export async function POST(request: Request) {
             sendLog(`[✅] Última página alcanzada. Recolección finalizada.`);
             break;
           }
-            
+
           sendLog(`[➡️] Pasando a la siguiente página...`);
           await btnSiguiente.click();
           await page.waitForLoadState("networkidle");
-          await page.waitForTimeout(2000); 
-          
+          await page.waitForTimeout(2000);
+
           paginaActual++;
         }
 
         await browser.close();
-        
+
         // 5. Devolvemos el resultado final
         const listaOrdenada = Array.from(codigosRecolectados).sort();
         sendLog(`[🎉] ¡Éxito! Navegador cerrado. ${listaOrdenada.length} códigos listos.`);
         sendSuccess(listaOrdenada);
-        
+
         // Cerramos el tubo de transmisión
         controller.close();
 

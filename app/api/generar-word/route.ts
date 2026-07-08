@@ -10,10 +10,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "No hay datos para generar el documento." }, { status: 400 });
     }
 
-    // 1. Array donde guardaremos todos los párrafos del documento
     const parrafosDoc: Paragraph[] = [];
 
-    // Título Principal del Documento
+    // Título Principal
     parrafosDoc.push(
       new Paragraph({ 
         text: "Enunciados Extraídos - Edelvives Digital Plus (EPD)", 
@@ -22,12 +21,10 @@ export async function POST(request: Request) {
       })
     );
 
-    // 2. Iteramos sobre cada resultado extraído
     for (const item of resultados) {
       const codigo = item.codigo;
       const htmlText = item.enunciadoHtml;
 
-      // Añadimos el Código de la actividad (Estilo Título 2)
       parrafosDoc.push(
         new Paragraph({ 
           text: codigo, 
@@ -36,65 +33,62 @@ export async function POST(request: Request) {
         })
       );
 
-      // Preparamos el array de "fragmentos de texto" para el enunciado
       const fragmentosTexto: TextRun[] = [
-        new TextRun({ text: "Enunciado: ", bold: true })
+        new TextRun({ text: "", bold: true })
       ];
 
-      // Si falló la extracción, lo indicamos directamente
       if (!htmlText || htmlText.startsWith("[")) {
         fragmentosTexto.push(new TextRun({ text: htmlText || "[ERROR: Sin contenido]" }));
       } else {
-        // 3. Traducimos el HTML a formato Word (Igual que hacía BeautifulSoup)
         const $ = cheerio.load(htmlText);
         
-        $('*').contents().each((i, el) => {
-          if (el.type === 'text') {
-            const texto = $(el).text().replace(/\n/g, ' '); // Limpiamos saltos de línea raros
-            if (texto.trim() === '') return;
-            
-            let isBold = false;
-            let isItalic = false;
-            let isUnderline = false;
-            
-            // Subimos por el árbol HTML para ver si está dentro de una etiqueta <b>, <i>, <u>
-            let parent = el.parent;
-            while (parent && parent.type === 'tag') {
-              if (parent.name === 'b' || parent.name === 'strong') isBold = true;
-              if (parent.name === 'i' || parent.name === 'em') isItalic = true;
-              if (parent.name === 'u') isUnderline = true;
-              parent = parent.parent;
+        // Función recursiva que lee de izquierda a derecha manteniendo el orden perfecto
+        const procesarNodo = (nodo: any, isBold: boolean, isItalic: boolean, isUnderline: boolean) => {
+          if (nodo.type === 'text') {
+            // Limpiamos los saltos de línea invisibles del código fuente
+            const texto = nodo.data.replace(/\n/g, ''); 
+            if (texto) {
+              fragmentosTexto.push(new TextRun({ 
+                text: texto, 
+                bold: isBold, 
+                italics: isItalic, 
+                underline: isUnderline ? {} : undefined 
+              }));
             }
+          } else if (nodo.type === 'tag') {
+            const b = isBold || nodo.name === 'b' || nodo.name === 'strong';
+            const i = isItalic || nodo.name === 'i' || nodo.name === 'em';
+            const u = isUnderline || nodo.name === 'u';
             
-            fragmentosTexto.push(new TextRun({ 
-              text: texto, 
-              bold: isBold, 
-              italics: isItalic, 
-              underline: isUnderline ? {} : undefined 
-            }));
+            // Procesamos los hijos en orden
+            $(nodo).contents().each((_, hijo) => {
+              procesarNodo(hijo, b, i, u);
+            });
+            
+            // Añadimos un espacio al terminar un párrafo para que las palabras no se peguen
+            if (nodo.name === 'p') {
+               fragmentosTexto.push(new TextRun({ text: " " }));
+            }
           }
+        };
+
+        // Iniciamos la lectura desde la raíz
+        $('body').contents().each((_, hijo) => {
+          procesarNodo(hijo, false, false, false);
         });
       }
 
-      // Añadimos el párrafo ensamblado al documento
       parrafosDoc.push(new Paragraph({ children: fragmentosTexto }));
-      
-      // Salto de línea de separación
-      parrafosDoc.push(new Paragraph({ text: "" }));
+      parrafosDoc.push(new Paragraph({ text: "" })); // Espacio entre actividades
     }
 
-    // 4. Construimos el documento Word final
     const doc = new Document({
       sections: [{ properties: {}, children: parrafosDoc }]
     });
 
-    // 5. Lo empaquetamos en un Buffer de Node.js
     const nodeBuffer = await Packer.toBuffer(doc);
-    
-    // SOLUCIÓN: Lo convertimos a un Uint8Array (Estándar Web) para que TypeScript sea feliz
     const webBuffer = new Uint8Array(nodeBuffer);
 
-    // Devolvemos el archivo con las cabeceras correctas para que el navegador lo descargue
     return new Response(webBuffer, {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
