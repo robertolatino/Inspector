@@ -9,15 +9,13 @@ export async function POST(request: Request) {
 
   const encoder = new TextEncoder();
 
-  // Creamos un "Tubo de transmisión en vivo" (ReadableStream)
   const stream = new ReadableStream({
     async start(controller) {
 
-      // Funciones auxiliares para enviar datos por el "tubo"
       const sendLog = (msg: string) => {
         controller.enqueue(encoder.encode(JSON.stringify({ type: 'log', message: msg }) + '\n'));
       };
-      const sendSuccess = (codigos: string[]) => {
+      const sendSuccess = (codigos: any[]) => {
         controller.enqueue(encoder.encode(JSON.stringify({ type: 'success', codigos }) + '\n'));
       };
       const sendError = (error: string) => {
@@ -27,9 +25,8 @@ export async function POST(request: Request) {
       try {
         sendLog(`[🤖] Iniciando motor de recolección para: ${codigo_libro}...`);
 
-        // 1. Iniciamos el navegador
         const browser = await chromium.launch({
-          headless: true, // Ponlo en false si quieres ver el navegador trabajando
+          headless: false,
           args: [
             '--no-sandbox',                
             '--disable-setuid-sandbox',    
@@ -46,17 +43,14 @@ export async function POST(request: Request) {
         });
         const page = await context.newPage();
 
-        // --- NAVEGACIÓN Y LOGIN ---
         sendLog(`[🔐] Accediendo a la plataforma y verificando credenciales...`);
         await page.goto(`${url_base}/auth/login`);
 
         await page.locator('input[type="text"], input[type="email"], input[name="username"]').first().fill(usuario);
         await page.locator('input[type="password"], input[name="password"]').first().fill(contrasena);
         await page.locator('button[type="submit"], button:has-text("Iniciar sesión"), button:has-text("Login")').first().click();
-
         await page.waitForLoadState("networkidle");
 
-        // Ir a Contenidos y luego a la pestaña de Actividades
         sendLog(`[📂] Navegando a la sección de Actividades...`);
         await page.locator('div[aria-label="Contenidos"]').first().click();
         await page.waitForTimeout(1000);
@@ -65,7 +59,6 @@ export async function POST(request: Request) {
         await page.waitForLoadState("networkidle");
         await page.waitForTimeout(1500);
 
-        // 3. BUSCAMOS EL LIBRO
         sendLog(`[🔎] Escribiendo código padre en el buscador interno...`);
         const buscador = page.locator('input[data-testid="search"]');
         await buscador.fill("");
@@ -75,17 +68,15 @@ export async function POST(request: Request) {
         await page.waitForLoadState("networkidle");
         await page.waitForTimeout(3000);
 
-        // (ELIMINADO EL PASO 4 DE FILTROS. VAMOS DIRECTO A RECOLECTAR)
-
-        const codigosRecolectados = new Set<string>();
+        // Usamos un Map para evitar duplicados usando el GUID como clave única
+        const codigosRecolectados = new Map<string, string>();
         let paginaActual = 1;
 
-        // --- BUCLE DE RECOLECCIÓN ---
         while (true) {
           sendLog(`[📖] Analizando página ${paginaActual} de resultados...`);
 
-        // Recogemos SOLO el primer <span> dentro del enlace en la nueva estructura de la tabla
-          const elementos = await page.locator('.table-body-cell-subtitle a span:first-child').all();
+          // Recogemos la etiqueta <a> entera para poder leer tanto el texto como el enlace
+          const elementos = await page.locator('.table-body-cell-subtitle a').all();
 
           if (elementos.length === 0) {
             sendLog(`[ℹ️] No hay elementos en la página ${paginaActual}. Terminado.`);
@@ -93,15 +84,20 @@ export async function POST(request: Request) {
           }
 
           for (const el of elementos) {
-            const codigo = await el.innerText();
-            // Validamos que realmente tenga contenido antes de añadirlo
-            if (codigo.trim()) {
-              codigosRecolectados.add(codigo.trim());
+            const href = await el.getAttribute('href');
+            const name = await el.locator('span').first().innerText();
+            
+            if (href && name.trim()) {
+              // Extraemos todo lo que hay después del último '/'
+              const guid = href.split('/').pop();
+              if (guid) {
+                codigosRecolectados.set(guid, name.trim());
+              }
             }
           }
 
           const btnSiguiente = page.locator('button[aria-label="Go to next page"], button[aria-label="Ir a la página siguiente"], ul.MuiPagination-ul li:last-child button').first();
-
+          
           const isVisible = await btnSiguiente.isVisible();
           if (!isVisible) {
             sendLog(`[✅] Solo existe una página. Recolección finalizada.`);
@@ -124,12 +120,17 @@ export async function POST(request: Request) {
 
         await browser.close();
 
-        // 5. Devolvemos el resultado final
-        const listaOrdenada = Array.from(codigosRecolectados).sort();
+        // Formateamos el resultado final como el Excel lo necesita
+        const listaOrdenada = Array.from(codigosRecolectados.entries())
+          .map(([guid, name]) => ({
+            "GUID/ERP": guid,
+            "Name": name
+          }))
+          // Ordenamos alfabéticamente por el código de actividad
+          .sort((a, b) => a.Name.localeCompare(b.Name));
+
         sendLog(`[🎉] ¡Éxito! Navegador cerrado. ${listaOrdenada.length} códigos listos.`);
         sendSuccess(listaOrdenada);
-
-        // Cerramos el tubo de transmisión
         controller.close();
 
       } catch (error) {
@@ -140,7 +141,6 @@ export async function POST(request: Request) {
     }
   });
 
-  // Enviamos la respuesta como un flujo de datos continuo (NDJSON)
   return new Response(stream, {
     headers: {
       'Content-Type': 'application/x-ndjson',

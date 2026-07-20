@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import * as XLSX from 'xlsx';
 
 export default function Home() {
   // --- ESTADOS DE LA APLICACIÓN ---
@@ -11,7 +12,8 @@ export default function Home() {
   // --- ESTADOS DEL RECOLECTOR (PASO 1) ---
   const [codigoPadre, setCodigoPadre] = useState("");
   const [isRecolectando, setIsRecolectando] = useState(false);
-  const [codigosExtraidos, setCodigosExtraidos] = useState<string[]>([]);
+  // CAMBIO: Ahora guarda un array de objetos { "GUID/ERP": "...", "Name": "..." }
+  const [codigosExtraidos, setCodigosExtraidos] = useState<any[]>([]);
   const [recolectorError, setRecolectorError] = useState("");
 
   // --- ESTADOS DE LA TERMINAL EN VIVO ---
@@ -19,7 +21,7 @@ export default function Home() {
   const terminalRef = useRef<HTMLDivElement>(null);
 
   // --- ESTADOS DEL EXTRACTOR (PASO 2) ---
-  const [codigosAExtraer, setCodigosAExtraer] = useState<string[]>([]);
+  const [codigosAExtraer, setCodigosAExtraer] = useState<any[]>([]);
   const [isExtrayendo, setIsExtrayendo] = useState(false);
   const [enunciadosExtraidos, setEnunciadosExtraidos] = useState<any[]>([]);
   const [extractorError, setExtractorError] = useState("");
@@ -51,10 +53,9 @@ export default function Home() {
     setIsRecolectando(true);
     setRecolectorError("");
     setCodigosExtraidos([]);
-    setLogs([]); // Limpiamos la terminal de usos anteriores
+    setLogs([]);
 
     try {
-      // Definimos la URL base según la plataforma seleccionada en el login
       const urlBase = credenciales.plataforma === "EPD"
         ? "https://publisher.edelvivesdigitalplus.com"
         : "https://publisher.bimedigital.com";
@@ -70,7 +71,6 @@ export default function Home() {
         })
       });
 
-      // Leemos el stream de datos en vivo (transmisión por partes) en lugar de esperar al final
       const reader = respuesta.body?.getReader();
       if (!reader) throw new Error("No se pudo conectar con el robot.");
 
@@ -84,10 +84,7 @@ export default function Home() {
           break;
         }
 
-        // Decodificamos el "trocito" de datos que acaba de llegar
         const chunkString = decoder.decode(value, { stream: true });
-
-        // A veces llegan varios JSON pegados rápidamente, los separamos por salto de línea
         const lineas = chunkString.split('\n').filter(line => line.trim() !== '');
 
         for (const linea of lineas) {
@@ -114,50 +111,79 @@ export default function Home() {
     }
   };
 
-  // --- FUNCIÓN: DESCARGAR TXT ---
+  // --- NUEVA FUNCIÓN: DESCARGAR EXCEL ---
+  const descargarExcel = () => {
+    try {
+      if (!codigosExtraidos || codigosExtraidos.length === 0) return;
+
+      const worksheet = XLSX.utils.json_to_sheet(codigosExtraidos);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Hotspots");
+
+      XLSX.writeFile(workbook, `export_hotspots_${codigoPadre}.xlsx`);
+    } catch (e) {
+      console.error("Error al descargar el archivo Excel:", e);
+    }
+  };
+
+  // --- FUNCIÓN: DESCARGAR TXT (ADAPTADA PARA EL EXTRACTOR) ---
   const descargarTxt = () => {
     try {
       if (!codigosExtraidos || codigosExtraidos.length === 0) return;
 
-      // Unimos el array limpio con un salto de línea puro (\r\n para mayor compatibilidad)
-      const contenido = codigosExtraidos.join('\r\n');
+      // Extraemos solo la propiedad "Name" para el TXT del extractor
+      const contenido = codigosExtraidos.map(item => item.Name).join('\r\n');
 
       const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
-      // Usamos setAttribute que es más fiable a la hora de forzar la descarga en React
       link.setAttribute('download', `codigos_${codigoPadre}.txt`);
       document.body.appendChild(link);
       link.click();
 
-      // Limpieza
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (e) {
-      console.error("Error al descargar el archivo:", e);
+      console.error("Error al descargar el archivo TXT:", e);
     }
   };
 
   // --- FUNCIONES DEL EXTRACTOR ---
-
-  // 1. Leer el TXT que sube el usuario
+  // 1. Leer el EXCEL que sube el usuario (Soporta versión simple y versión completa)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (evento) => {
-      const contenido = evento.target?.result as string;
-      // Limpiamos la lista quitando espacios y saltos de línea vacíos
-      const lineas = contenido.split('\n').map(l => l.trim()).filter(l => l !== '');
-      setCodigosAExtraer(lineas);
-      setExtractorError("");
+      try {
+        const data = new Uint8Array(evento.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[firstSheetName];
+
+        // Convertimos la hoja de Excel en un array de objetos JSON
+        const json = XLSX.utils.sheet_to_json(worksheet);
+
+        // Filtramos para asegurar que existan las columnas clave,
+        // y mapeamos para IGNORAR el resto de columnas (Position, Type, Page, etc.)
+        const itemsValidos = (json as any[])
+          .filter(item => item["GUID/ERP"] && item["Name"])
+          .map(item => ({
+            "GUID/ERP": item["GUID/ERP"],
+            "Name": item["Name"]
+          }));
+
+        setCodigosAExtraer(itemsValidos);
+        setExtractorError("");
+      } catch (error) {
+        setExtractorError("Error al leer el Excel. Asegúrate de que contenga las columnas GUID/ERP y Name.");
+      }
     };
-    reader.readAsText(file);
+    reader.readAsArrayBuffer(file);
   };
 
-  // 2. Ejecutar el robot extractor
   const handleExtraccion = async () => {
     if (codigosAExtraer.length === 0) {
       setExtractorError("Por favor, sube un archivo con códigos primero.");
@@ -224,7 +250,6 @@ export default function Home() {
     }
   };
 
-  // 3. Generar y descargar el documento Word
   const descargarWord = async () => {
     try {
       setExtractorError("");
@@ -237,7 +262,6 @@ export default function Home() {
 
       if (!respuesta.ok) throw new Error("Error al generar el documento Word.");
 
-      // Convertimos la respuesta en un archivo blob .docx
       const blob = await respuesta.blob();
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -423,7 +447,7 @@ export default function Home() {
 
               {/* Lógica condicional para los 3 estados del área central */}
               {isRecolectando ? (
-                // NUEVA TERMINAL EN VIVO
+                // TERMINAL EN VIVO
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
                   <div ref={terminalRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {logs.map((log, index) => (
@@ -437,23 +461,39 @@ export default function Home() {
                   <div className="border-2 border-dashed border-emerald-300 bg-emerald-50 rounded-lg p-8 flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-emerald-500 text-white rounded-md flex items-center justify-center text-2xl mb-3 shadow-sm">✓</div>
                     <h3 className="text-emerald-800 font-bold text-lg">¡Recolección completada!</h3>
-                    <p className="text-emerald-600 mb-4">Se han extraído {codigosExtraidos.length} códigos de actividades.</p>
-                    <button
-                      onClick={descargarTxt}
-                      className="bg-emerald-600 text-white px-6 py-2 rounded-md font-medium hover:bg-emerald-700 transition-colors shadow-sm"
-                    >
-                      Descargar archivo .txt
-                    </button>
+                    <p className="text-emerald-600 mb-6">Se han extraído {codigosExtraidos.length} códigos con su GUID.</p>
+
+                    <div className="flex space-x-4">
+                      <button
+                        onClick={descargarExcel}
+                        className="bg-emerald-600 text-white px-6 py-2 rounded-md font-medium hover:bg-emerald-700 transition-colors shadow-sm flex items-center space-x-2"
+                      >
+                        <span className="text-lg">📊</span>
+                        <span>Descargar Excel</span>
+                      </button>
+
+                      <button
+                        onClick={descargarTxt}
+                        className="bg-slate-200 text-slate-700 px-6 py-2 rounded-md font-medium hover:bg-slate-300 transition-colors shadow-sm flex items-center space-x-2"
+                        title="Necesario para el Paso 2 (Extracción)"
+                      >
+                        <span className="text-lg">📝</span>
+                        <span>Descargar TXT (Para Paso 2)</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Preview de los códigos */}
+                  {/* Preview de los códigos (Actualizada a objetos) */}
                   <div className="border border-slate-200 rounded-lg">
                     <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
                       Vista previa de códigos recolectados
                     </div>
-                    <div className="p-4 h-48 overflow-y-auto bg-slate-50/50 font-mono text-sm text-slate-600">
-                      {codigosExtraidos.map((codigo, idx) => (
-                        <div key={idx} className="py-1 border-b border-slate-100 last:border-0">{codigo}</div>
+                    <div className="p-4 h-48 overflow-y-auto bg-slate-50/50 font-mono text-sm space-y-2">
+                      {codigosExtraidos.map((item, idx) => (
+                        <div key={idx} className="py-2 border-b border-slate-200 last:border-0 flex flex-col">
+                          <span className="font-bold text-[#2a40b3]">{item.Name}</span>
+                          <span className="text-xs text-slate-500 truncate">GUID: {item["GUID/ERP"]}</span>
+                        </div>
                       ))}
                     </div>
                   </div>
@@ -470,25 +510,25 @@ export default function Home() {
           {/* VISTA 2: EXTRACTOR (CONECTADO A LA API) */}
           {activeView === "extractor" && (
             <div className="w-full bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
-              <p className="text-slate-600 mb-6">Sube el archivo de códigos generado en el paso anterior para extraer sus enunciados.</p>
+              <p className="text-slate-600 mb-6">Sube el archivo Excel generado en el paso anterior para extraer sus enunciados a velocidad turbo.</p>
 
-              {/* Botonera Superior: Subir TXT y Ejecutar */}
+              {/* Botonera Superior: Subir EXCEL y Ejecutar */}
               <div className="flex items-center justify-between mb-6">
                 <div className="relative">
                   <input
                     type="file"
-                    accept=".txt"
+                    accept=".xlsx"
                     onChange={handleFileUpload}
                     disabled={isExtrayendo}
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                   />
                   <div className={`border-2 border-dashed rounded-lg p-4 flex items-center space-x-4 transition-colors ${codigosAExtraer.length > 0 ? 'border-emerald-400 bg-emerald-50' : 'border-[#2a40b3]/30 bg-[#2a40b3]/5 hover:bg-[#2a40b3]/10'}`}>
-                    <span className="text-2xl">📁</span>
+                    <span className="text-2xl">📊</span>
                     <div>
                       <p className="text-slate-700 font-medium">
-                        {codigosAExtraer.length > 0 ? `Archivo cargado: ${codigosAExtraer.length} códigos listos` : 'Seleccionar archivo codigos.txt'}
+                        {codigosAExtraer.length > 0 ? `Archivo cargado: ${codigosAExtraer.length} códigos listos` : 'Seleccionar archivo .xlsx'}
                       </p>
-                      <p className="text-sm text-slate-500">Solo archivos .txt separados por salto de línea</p>
+                      <p className="text-sm text-slate-500">Sube el archivo export_hotspots de la recolección</p>
                     </div>
                   </div>
                 </div>
@@ -519,6 +559,12 @@ export default function Home() {
               {isExtrayendo ? (
                 // TERMINAL EN VIVO
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
+                  <div className="flex items-center space-x-2 mb-4 border-b border-slate-700 pb-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
+                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
+                    <span className="text-slate-400 text-xs ml-2 font-mono">Terminal de Extracción...</span>
+                  </div>
                   <div ref={terminalExtractorRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {extractorLogs.map((log, index) => (
                       <div key={index} className="opacity-90">{log}</div>
@@ -540,32 +586,31 @@ export default function Home() {
                     >
                       <span className="text-xl">📄</span>
                       <span>Descargar Word (.docx)</span>
-                      </button>
+                    </button>
+                  </div>
+
+                  <div className="border border-slate-200 rounded-lg">
+                    <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
+                      Vista previa de enunciados
                     </div>
+                    <div className="p-4 h-96 overflow-y-auto bg-slate-50 text-sm text-slate-600 space-y-4 shadow-inner">
+                      {enunciadosExtraidos.map((item, idx) => (
+                        <div key={idx} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-emerald-300 transition-colors">
+                          <span className="font-bold text-[#2a40b3] block mb-3 border-b border-slate-100 pb-2">
+                            {item.codigo}
+                          </span>
 
-                    <div className="border border-slate-200 rounded-lg">
-                      <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
-                        Vista previa de enunciados
-                      </div>
-                      <div className="p-4 h-96 overflow-y-auto bg-slate-50 text-sm text-slate-600 space-y-4 shadow-inner">
-                        {enunciadosExtraidos.map((item, idx) => (
-                          <div key={idx} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm hover:border-emerald-300 transition-colors">
-                            <span className="font-bold text-[#2a40b3] block mb-3 border-b border-slate-100 pb-2">
-                              {item.codigo}
-                            </span>
-
-                            {/* Renderizado de HTML real eliminando las etiquetas <img> */}
-                            <div
-                              className="text-sm text-slate-700 prose prose-sm max-w-none [&_p]:m-0 [&_p]:mb-1"
-                              dangerouslySetInnerHTML={{
-                                __html: item.enunciadoHtml ? item.enunciadoHtml.replace(/<img[^>]*>/g, '') : ''
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
+                          <div
+                            className="text-sm text-slate-700 prose prose-sm max-w-none [&_p]:m-0 [&_p]:mb-1"
+                            dangerouslySetInnerHTML={{
+                              __html: item.enunciadoHtml ? item.enunciadoHtml.replace(/<img[^>]*>/g, '') : ''
+                            }}
+                          />
+                        </div>
+                      ))}
                     </div>
                   </div>
+                </div>
               ) : (
                 // PANTALLA DE REPOSO
                 <div className="border-2 border-dashed border-slate-200 rounded-lg h-64 flex flex-col items-center justify-center text-slate-400">
