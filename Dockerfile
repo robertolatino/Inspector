@@ -1,43 +1,31 @@
-# 1. Imagen base oficial de Playwright con Ubuntu Noble y Node.js preinstalado
-FROM mcr.microsoft.com/playwright:v1.49.1-noble AS base
+# 1. Usar una imagen oficial de Node.js (Debian Bookworm es muy estable)
+FROM node:20-bookworm
 
-# --- Etapa de dependencias ---
-FROM base AS deps
+# 2. Establecer el directorio de trabajo dentro del servidor
 WORKDIR /app
 
-# Copiar manifiestos de paquetes
-COPY package.json package-lock.json* ./
-# Instala dependencias limpias de producción y desarrollo (necesarias para compilar Next.js)
-RUN npm ci
+# 3. Copiar solo los archivos de dependencias primero (Optimización de caché)
+COPY package*.json ./
 
-# --- Etapa de compilación ---
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
+# 4. Instalar las dependencias de Node.js de tu proyecto
+RUN npm install
+
+# 5. EL PASO MÁGICO: Instalar Chromium y TODAS las librerías de Linux necesarias (fuentes, audio, video)
+RUN npx playwright install --with-deps chromium
+
+# 6. Copiar el resto de tu código fuente al servidor
 COPY . .
 
-# Desactivar telemetría de Next.js durante la build
-ENV NEXT_TELEMETRY_DISABLED=1
+# 7. Construir la versión optimizada de Next.js
 RUN npm run build
 
-# --- Etapa final de ejecución ---
-FROM base AS runner
-WORKDIR /app
-
-ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
+# 8. Configurar las variables de entorno obligatorias para Google Cloud Run
 ENV PORT=8080
-ENV HOSTNAME="0.0.0.0"
+ENV HOST=0.0.0.0
+ENV NODE_ENV=production
 
-# Decirle a Playwright dónde están los navegadores instalados globalmente en la imagen base
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-# Copiar el build standalone generado por Next.js
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
+# 9. Exponer el puerto 8080
 EXPOSE 8080
 
-# Comando para arrancar el servidor optimizado de Next.js
-CMD ["node", "server.js"]
+# 10. Comando final para encender tu aplicación
+CMD ["npm", "start"]

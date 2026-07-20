@@ -1,11 +1,8 @@
 node_modules
 .next
 out
-build
-dist
 .git
-.gitignore
+.env*
 README.md
-.firebase
-firebase.json
-.firebaserc
+Dockerfile
+.dockerignore
