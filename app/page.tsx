@@ -111,7 +111,7 @@ export default function Home() {
     }
   };
 
-  // --- NUEVA FUNCIÓN: DESCARGAR EXCEL ---
+  // --- FUNCIÓN: DESCARGAR EXCEL ---
   const descargarExcel = () => {
     try {
       if (!codigosExtraidos || codigosExtraidos.length === 0) return;
@@ -127,7 +127,7 @@ export default function Home() {
   };
 
   // --- FUNCIONES DEL EXTRACTOR ---
-  // 1. Leer el EXCEL que sube el usuario (Soporta versión simple y versión completa)
+  // 1. Leer el EXCEL
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -193,7 +193,7 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let isDone = false;
-      let buffer = ""; // NUEVO: Creamos una "sala de espera" para los datos incompletos
+      let buffer = ""; //Creamos una "sala de espera" para los datos incompletos
 
       while (!isDone) {
         const { done, value } = await reader.read();
@@ -208,8 +208,8 @@ export default function Home() {
         // Separamos el buffer por saltos de línea
         const partes = buffer.split('\n');
         
-        // Magia aquí: El ÚLTIMO elemento del array siempre será un paquete incompleto 
-        // (o un string vacío). Lo sacamos del array y lo devolvemos al buffer 
+        // El ultimo elemento del array siempre será un paquete incompleto 
+        // Lo sacamos del array y lo devolvemos al buffer 
         // para que espere a unirse con el siguiente paquete que llegue de la red.
         buffer = partes.pop() || "";
 
@@ -332,7 +332,7 @@ export default function Home() {
     );
   }
 
-  // --- COMPONENTE PRINCIPAL: DASHBOARD ---
+  // ---DASHBOARD ---
   return (
     <div className="flex h-screen bg-slate-50 font-sans">
 
@@ -382,7 +382,7 @@ export default function Home() {
       {/* ÁREA CENTRAL DE TRABAJO */}
       <main className="flex-1 flex flex-col overflow-hidden">
 
-        {/* CABECERA TOP */}
+        {/* CABECERA */}
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8">
           <h2 className="text-xl font-semibold text-slate-800">
             {activeView === "recolector" && "Búsqueda y Recolección de Códigos"}
@@ -404,7 +404,7 @@ export default function Home() {
           </div>
         </header>
 
-        {/* CONTENIDO DINÁMICO */}
+        {/* CONTENIDO */}
         <div className="flex-1 overflow-auto p-8">
 
           {/* VISTA 1: RECOLECTOR */}
@@ -447,7 +447,7 @@ export default function Home() {
 
               {/* Lógica condicional para los 3 estados del área central */}
               {isRecolectando ? (
-                // TERMINAL EN VIVO
+                // TERMINAL
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
                   <div ref={terminalRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {logs.map((log, index) => (
@@ -474,7 +474,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  {/* Preview de los códigos (Actualizada a objetos) */}
+                  {/* Preview de los códigos */}
                   <div className="border border-slate-200 rounded-lg">
                     <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
                       Vista previa
@@ -502,7 +502,7 @@ export default function Home() {
           {activeView === "extractor" && (
             <div className="w-full bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
 
-              {/* Botonera Superior: Subir EXCEL y Ejecutar */}
+              {/* Botonera Superior */}
               <div className="flex items-center justify-between mb-6">
                 <div className="relative">
                   <input
@@ -546,7 +546,7 @@ export default function Home() {
 
               {/* Lógica condicional para los 3 estados del Extractor */}
               {isExtrayendo ? (
-                // TERMINAL EN VIVO
+                // TERMINAL
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
                   <div ref={terminalExtractorRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {extractorLogs.map((log, index) => (
