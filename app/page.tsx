@@ -324,24 +324,21 @@ export default function Home() {
             onClick={() => setActiveView("recolector")}
             className={`w-full flex items-center space-x-3 p-3 rounded-lg transition-colors ${activeView === "recolector" ? "bg-[#2a40b3] text-white" : "text-indigo-200 hover:bg-indigo-800/50"}`}
           >
-            <span className="text-lg">📋</span>
-            <span className="hidden md:block font-medium">1. Recolección</span>
+            <span className="hidden md:block font-medium">Recolección</span>
           </button>
 
           <button
             onClick={() => setActiveView("extractor")}
             className={`w-full flex items-center space-x-3 p-3 rounded-lg transition-colors ${activeView === "extractor" ? "bg-[#2a40b3] text-white" : "text-indigo-200 hover:bg-indigo-800/50"}`}
           >
-            <span className="text-lg">📥</span>
-            <span className="hidden md:block font-medium">2. Extracción</span>
+            <span className="hidden md:block font-medium">Extracción</span>
           </button>
 
           <button
             onClick={() => setActiveView("analista")}
             className={`w-full flex items-center space-x-3 p-3 rounded-lg transition-colors ${activeView === "analista" ? "bg-[#2a40b3] text-white" : "text-indigo-200 hover:bg-indigo-800/50"}`}
           >
-            <span className="text-lg">🧠</span>
-            <span className="hidden md:block font-medium">3. Análisis IA</span>
+            <span className="hidden md:block font-medium">Análisis IA (Proximamente)</span>
           </button>
         </nav>
 
@@ -522,12 +519,6 @@ export default function Home() {
               {isExtrayendo ? (
                 // TERMINAL EN VIVO
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
-                  <div className="flex items-center space-x-2 mb-4 border-b border-slate-700 pb-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                    <span className="text-slate-400 text-xs ml-2 font-mono">Terminal de Extracción...</span>
-                  </div>
                   <div ref={terminalExtractorRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {extractorLogs.map((log, index) => (
                       <div key={index} className="opacity-90">{log}</div>
@@ -554,7 +545,7 @@ export default function Home() {
 
                     <div className="border border-slate-200 rounded-lg">
                       <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
-                        Vista previa de enunciados (HTML extraído)
+                        Vista previa de enunciados
                       </div>
                       <div className="p-4 h-96 overflow-y-auto bg-slate-50 text-sm text-slate-600 space-y-4 shadow-inner">
                         {enunciadosExtraidos.map((item, idx) => (
@@ -578,8 +569,8 @@ export default function Home() {
               ) : (
                 // PANTALLA DE REPOSO
                 <div className="border-2 border-dashed border-slate-200 rounded-lg h-64 flex flex-col items-center justify-center text-slate-400">
-                  <span className="text-2xl mb-2">📥</span>
-                  <p>Carga un archivo TXT para ver la previa de códigos</p>
+                  <span className="text-2xl mb-2">📝</span>
+                  <p>Carga un archivo TXT</p>
                 </div>
               )}
             </div>
