@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       const sendError = (error: string) => controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error }) + '\n'));
 
       try {
-        sendLog(`[🤖 Extractor] Iniciando motor turbo para extraer ${codigos.length} enunciados...`);
+        sendLog(`[Extractor] Iniciando motor para ${codigos.length} enunciados...`);
 
         const browser = await chromium.launch({
           headless: false, // Puedes ponerlo en true cuando compruebes que va bien
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
             '--disable-gpu'                
           ]
         });
-        sendLog(`[🔌] Navegador virtual iniciado.`);
+        sendLog(`Navegador iniciado.`);
 
         const context = await browser.newContext({
           locale: 'es-ES',
@@ -38,14 +38,14 @@ export async function POST(request: Request) {
         const page = await context.newPage();
 
         // --- LOGIN ---
-        sendLog(`[🔐] Accediendo a la plataforma...`);
+        sendLog(`Accediendo a la plataforma...`);
         await page.goto(`${url_base}/auth/login`);
 
         await page.locator('input[type="text"], input[type="email"], input[name="username"]').first().fill(usuario);
         await page.locator('input[type="password"], input[name="password"]').first().fill(contrasena);
         await page.locator('button[type="submit"], button:has-text("Iniciar sesión"), button:has-text("Login")').first().click();
         
-        sendLog(`[⏳] Esperando a que el servidor confirme la sesión...`);
+        sendLog(`Esperando sesión...`);
         
         // CORRECCIÓN CLAVE: Esperamos obligatoriamente a que aparezca el botón de "Contenidos".
         // Si aparece, significa que las cookies de sesión ya están guardadas.
@@ -60,7 +60,7 @@ export async function POST(request: Request) {
           const guid = item["GUID/ERP"];
           const codigo = item["Name"];
 
-          sendLog(`[⚡] Extrayendo [${i + 1}/${codigos.length}]: ${codigo}...`);
+          sendLog(`Extrayendo [${i + 1}/${codigos.length}]: ${codigo}...`);
 
           try {
             // Construimos la URL directa al editor usando el GUID
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
 
         await browser.close();
 
-        sendLog(`[🎉] Extracción Turbo completada. ${resultados.length} procesados.`);
+        sendLog(`Extracción completada. ${resultados.length} procesados.`);
         sendSuccess(resultados);
         controller.close();
 

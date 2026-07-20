@@ -126,29 +126,6 @@ export default function Home() {
     }
   };
 
-  // --- FUNCIÓN: DESCARGAR TXT (ADAPTADA PARA EL EXTRACTOR) ---
-  const descargarTxt = () => {
-    try {
-      if (!codigosExtraidos || codigosExtraidos.length === 0) return;
-
-      // Extraemos solo la propiedad "Name" para el TXT del extractor
-      const contenido = codigosExtraidos.map(item => item.Name).join('\r\n');
-
-      const blob = new Blob([contenido], { type: 'text/plain;charset=utf-8' });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `codigos_${codigoPadre}.txt`);
-      document.body.appendChild(link);
-      link.click();
-
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-    } catch (e) {
-      console.error("Error al descargar el archivo TXT:", e);
-    }
-  };
-
   // --- FUNCIONES DEL EXTRACTOR ---
   // 1. Leer el EXCEL que sube el usuario (Soporta versión simple y versión completa)
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -285,7 +262,7 @@ export default function Home() {
           <div className="flex justify-center mb-6">
             <div className="bg-[#2a40b3] text-white p-3 rounded-xl font-bold text-2xl">EDV</div>
           </div>
-          <h1 className="text-2xl font-bold text-center text-slate-800 mb-2">Inspector Suite</h1>
+          <h1 className="text-2xl font-bold text-center text-slate-800 mb-2">Inspector</h1>
           <p className="text-sm text-center text-slate-500 mb-8">Inicia sesión con tus credenciales del backoffice</p>
 
           <div className="space-y-4">
@@ -324,7 +301,7 @@ export default function Home() {
               className="w-full bg-[#2a40b3] hover:bg-[#1e2e85] text-white font-medium py-2 px-4 rounded-md transition-colors mt-4"
               disabled={!credenciales.usuario || !credenciales.password}
             >
-              Acceder a la Suite
+              Acceder
             </button>
           </div>
         </div>
@@ -461,7 +438,7 @@ export default function Home() {
                   <div className="border-2 border-dashed border-emerald-300 bg-emerald-50 rounded-lg p-8 flex flex-col items-center justify-center text-center">
                     <div className="w-12 h-12 bg-emerald-500 text-white rounded-md flex items-center justify-center text-2xl mb-3 shadow-sm">✓</div>
                     <h3 className="text-emerald-800 font-bold text-lg">¡Recolección completada!</h3>
-                    <p className="text-emerald-600 mb-6">Se han extraído {codigosExtraidos.length} códigos con su GUID.</p>
+                    <p className="text-emerald-600 mb-6">Se han extraído {codigosExtraidos.length} códigos</p>
 
                     <div className="flex space-x-4">
                       <button
@@ -471,28 +448,19 @@ export default function Home() {
                         <span className="text-lg">📊</span>
                         <span>Descargar Excel</span>
                       </button>
-
-                      <button
-                        onClick={descargarTxt}
-                        className="bg-slate-200 text-slate-700 px-6 py-2 rounded-md font-medium hover:bg-slate-300 transition-colors shadow-sm flex items-center space-x-2"
-                        title="Necesario para el Paso 2 (Extracción)"
-                      >
-                        <span className="text-lg">📝</span>
-                        <span>Descargar TXT (Para Paso 2)</span>
-                      </button>
                     </div>
                   </div>
 
                   {/* Preview de los códigos (Actualizada a objetos) */}
                   <div className="border border-slate-200 rounded-lg">
                     <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
-                      Vista previa de códigos recolectados
+                      Vista previa
                     </div>
                     <div className="p-4 h-48 overflow-y-auto bg-slate-50/50 font-mono text-sm space-y-2">
                       {codigosExtraidos.map((item, idx) => (
                         <div key={idx} className="py-2 border-b border-slate-200 last:border-0 flex flex-col">
                           <span className="font-bold text-[#2a40b3]">{item.Name}</span>
-                          <span className="text-xs text-slate-500 truncate">GUID: {item["GUID/ERP"]}</span>
+                          <span className="text-xs text-slate-500 truncate">{item["GUID/ERP"]}</span>
                         </div>
                       ))}
                     </div>
@@ -510,7 +478,6 @@ export default function Home() {
           {/* VISTA 2: EXTRACTOR (CONECTADO A LA API) */}
           {activeView === "extractor" && (
             <div className="w-full bg-white rounded-lg border border-slate-200 p-6 shadow-sm">
-              <p className="text-slate-600 mb-6">Sube el archivo Excel generado en el paso anterior para extraer sus enunciados a velocidad turbo.</p>
 
               {/* Botonera Superior: Subir EXCEL y Ejecutar */}
               <div className="flex items-center justify-between mb-6">
@@ -523,12 +490,11 @@ export default function Home() {
                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
                   />
                   <div className={`border-2 border-dashed rounded-lg p-4 flex items-center space-x-4 transition-colors ${codigosAExtraer.length > 0 ? 'border-emerald-400 bg-emerald-50' : 'border-[#2a40b3]/30 bg-[#2a40b3]/5 hover:bg-[#2a40b3]/10'}`}>
-                    <span className="text-2xl">📊</span>
                     <div>
                       <p className="text-slate-700 font-medium">
                         {codigosAExtraer.length > 0 ? `Archivo cargado: ${codigosAExtraer.length} códigos listos` : 'Seleccionar archivo .xlsx'}
                       </p>
-                      <p className="text-sm text-slate-500">Sube el archivo export_hotspots de la recolección</p>
+                      <p className="text-sm text-slate-500">Sube el archivo generado en el paso anterior o el extraido desde Tangerine</p>
                     </div>
                   </div>
                 </div>
@@ -544,7 +510,7 @@ export default function Home() {
                       <span>Extrayendo...</span>
                     </>
                   ) : (
-                    <span>Iniciar Extracción</span>
+                    <span>Iniciar</span>
                   )}
                 </button>
               </div>
@@ -559,12 +525,6 @@ export default function Home() {
               {isExtrayendo ? (
                 // TERMINAL EN VIVO
                 <div className="bg-slate-900 rounded-lg p-6 flex flex-col h-72 shadow-inner border border-slate-800">
-                  <div className="flex items-center space-x-2 mb-4 border-b border-slate-700 pb-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-                    <div className="w-3 h-3 rounded-full bg-green-500"></div>
-                    <span className="text-slate-400 text-xs ml-2 font-mono">Terminal de Extracción...</span>
-                  </div>
                   <div ref={terminalExtractorRef} className="flex-1 overflow-y-auto font-mono text-sm text-green-400 space-y-1 pr-2">
                     {extractorLogs.map((log, index) => (
                       <div key={index} className="opacity-90">{log}</div>
@@ -584,7 +544,6 @@ export default function Home() {
                       onClick={descargarWord}
                       className="bg-emerald-600 text-white px-4 py-2 rounded-md font-medium hover:bg-emerald-700 transition-colors shadow-sm flex items-center space-x-2"
                     >
-                      <span className="text-xl">📄</span>
                       <span>Descargar Word (.docx)</span>
                     </button>
                   </div>
@@ -615,7 +574,7 @@ export default function Home() {
                 // PANTALLA DE REPOSO
                 <div className="border-2 border-dashed border-slate-200 rounded-lg h-64 flex flex-col items-center justify-center text-slate-400">
                   <span className="text-2xl mb-2">📝</span>
-                  <p>Carga un archivo TXT</p>
+                  <p>Carga un archivo</p>
                 </div>
               )}
             </div>
