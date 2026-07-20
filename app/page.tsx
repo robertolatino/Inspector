@@ -193,6 +193,7 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let isDone = false;
+      let buffer = ""; // NUEVO: Creamos una "sala de espera" para los datos incompletos
 
       while (!isDone) {
         const { done, value } = await reader.read();
@@ -201,10 +202,20 @@ export default function Home() {
           break;
         }
 
-        const chunkString = decoder.decode(value, { stream: true });
-        const lineas = chunkString.split('\n').filter(line => line.trim() !== '');
+        // Añadimos el nuevo paquete al buffer que ya teníamos
+        buffer += decoder.decode(value, { stream: true });
+        
+        // Separamos el buffer por saltos de línea
+        const partes = buffer.split('\n');
+        
+        // Magia aquí: El ÚLTIMO elemento del array siempre será un paquete incompleto 
+        // (o un string vacío). Lo sacamos del array y lo devolvemos al buffer 
+        // para que espere a unirse con el siguiente paquete que llegue de la red.
+        buffer = partes.pop() || "";
 
-        for (const linea of lineas) {
+        for (const linea of partes) {
+          if (!linea.trim()) continue;
+          
           try {
             const data = JSON.parse(linea);
 
@@ -218,6 +229,18 @@ export default function Home() {
           } catch (e) {
             console.error("Error leyendo línea del stream:", linea);
           }
+        }
+      }
+
+      // Al terminar el stream por completo, si quedó algo atascado en el buffer, lo procesamos
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          if (data.type === 'success') {
+            setEnunciadosExtraidos(data.resultados);
+          }
+        } catch (e) {
+          console.error("Error procesando el bloque final:", e);
         }
       }
     } catch (error) {

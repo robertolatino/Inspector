@@ -20,7 +20,7 @@ export async function POST(request: Request) {
         sendLog(`[Extractor] Iniciando motor para ${codigos.length} enunciados...`);
 
         const browser = await chromium.launch({
-          headless: false, // Puedes ponerlo en true cuando compruebes que va bien
+          headless: true,
           args: [
             '--no-sandbox',                
             '--disable-setuid-sandbox',    
@@ -47,14 +47,14 @@ export async function POST(request: Request) {
         
         sendLog(`Esperando sesión...`);
         
-        // CORRECCIÓN CLAVE: Esperamos obligatoriamente a que aparezca el botón de "Contenidos".
+        // CORRECCIÓN: Esperamos obligatoriamente a que aparezca el botón de "Contenidos".
         // Si aparece, significa que las cookies de sesión ya están guardadas.
         await page.locator('div[aria-label="Contenidos"]').first().waitFor({ state: "visible", timeout: 15000 });
         await page.waitForTimeout(1000); // Pausa de cortesía extra de 1 segundo
 
         const resultados = [];
 
-        // --- BUCLE TURBO (NAVEGACIÓN DIRECTA) ---
+        // --- BUCLE DE RECOLECCIÓN ---
         for (let i = 0; i < codigos.length; i++) {
           const item = codigos[i];
           const guid = item["GUID/ERP"];
@@ -63,22 +63,20 @@ export async function POST(request: Request) {
           sendLog(`Extrayendo [${i + 1}/${codigos.length}]: ${codigo}...`);
 
           try {
-            // Construimos la URL directa al editor usando el GUID
+            //URL directa al editor usando el GUID
             const targetUrl = `${url_base}/contents/activities/${guid}/2`;
-            
-            // Navegamos directamente a la actividad logueados
+        
             await page.goto(targetUrl);
             await page.waitForLoadState("networkidle");
 
             const bloqueEnunciado = page.locator('div[data-id="stimulus"]');
 
             try {
-              // Esperamos a que cargue el bloque de edición
               await bloqueEnunciado.waitFor({ state: "visible", timeout: 8000 });
               const textareaOculto = bloqueEnunciado.locator('textarea').first();
               await textareaOculto.waitFor({ state: "attached", timeout: 3000 });
 
-              // Extraemos el HTML
+              // Extraemos HTML
               const descripcionHtml = await textareaOculto.evaluate((el: HTMLTextAreaElement) => el.value);
               resultados.push({ codigo, enunciadoHtml: descripcionHtml });
               

@@ -23,10 +23,10 @@ export async function POST(request: Request) {
       };
 
       try {
-        sendLog(`[🤖] Iniciando motor de recolección para: ${codigo_libro}...`);
+        sendLog(`Iniciando motor de recolección para: ${codigo_libro}...`);
 
         const browser = await chromium.launch({
-          headless: false,
+          headless: true,
           args: [
             '--no-sandbox',                
             '--disable-setuid-sandbox',    
@@ -34,7 +34,7 @@ export async function POST(request: Request) {
             '--disable-gpu'                
           ]
         });
-        sendLog(`[🔌] Navegador virtual iniciado en segundo plano.`);
+        sendLog(`Navegador  iniciado.`);
 
         const context = await browser.newContext({
           locale: 'es-ES',
@@ -43,7 +43,7 @@ export async function POST(request: Request) {
         });
         const page = await context.newPage();
 
-        sendLog(`[🔐] Accediendo a la plataforma y verificando credenciales...`);
+        sendLog(`Accediendo a la plataforma y verificando credenciales...`);
         await page.goto(`${url_base}/auth/login`);
 
         await page.locator('input[type="text"], input[type="email"], input[name="username"]').first().fill(usuario);
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         await page.locator('button[type="submit"], button:has-text("Iniciar sesión"), button:has-text("Login")').first().click();
         await page.waitForLoadState("networkidle");
 
-        sendLog(`[📂] Navegando a la sección de Actividades...`);
+        sendLog(`Navegando a la sección de Actividades...`);
         await page.locator('div[aria-label="Contenidos"]').first().click();
         await page.waitForTimeout(1000);
         
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
         await page.waitForLoadState("networkidle");
         await page.waitForTimeout(1500);
 
-        sendLog(`[🔎] Escribiendo código padre en el buscador interno...`);
+        sendLog(`Escribiendo código padre en el buscador interno...`);
         const buscador = page.locator('input[data-testid="search"]');
         await buscador.fill("");
         await buscador.fill(codigo_libro);
@@ -73,13 +73,13 @@ export async function POST(request: Request) {
         let paginaActual = 1;
 
         while (true) {
-          sendLog(`[📖] Analizando página ${paginaActual} de resultados...`);
+          sendLog(`Analizando página ${paginaActual} de resultados...`);
 
           // Recogemos la etiqueta <a> entera para poder leer tanto el texto como el enlace
           const elementos = await page.locator('.table-body-cell-subtitle a').all();
 
           if (elementos.length === 0) {
-            sendLog(`[ℹ️] No hay elementos en la página ${paginaActual}. Terminado.`);
+            sendLog(`No hay elementos en la página ${paginaActual}. Terminado.`);
             break;
           }
 
@@ -100,17 +100,17 @@ export async function POST(request: Request) {
           
           const isVisible = await btnSiguiente.isVisible();
           if (!isVisible) {
-            sendLog(`[✅] Solo existe una página. Recolección finalizada.`);
+            sendLog(`Solo existe una página. Recolección finalizada.`);
             break;
           }
 
           const isDisabled = await btnSiguiente.isDisabled();
           if (isDisabled) {
-            sendLog(`[✅] Última página alcanzada. Recolección finalizada.`);
+            sendLog(`Última página alcanzada. Recolección finalizada.`);
             break;
           }
 
-          sendLog(`[➡️] Pasando a la siguiente página...`);
+          sendLog(`Pasando a la siguiente página...`);
           await btnSiguiente.click();
           await page.waitForLoadState("networkidle");
           await page.waitForTimeout(2000);
@@ -120,7 +120,7 @@ export async function POST(request: Request) {
 
         await browser.close();
 
-        // Formateamos el resultado final como el Excel lo necesita
+        // Formateamos los resultados en un array de objetos y los ordenamos alfabéticamente por el nombre del código
         const listaOrdenada = Array.from(codigosRecolectados.entries())
           .map(([guid, name]) => ({
             "GUID/ERP": guid,
@@ -129,12 +129,12 @@ export async function POST(request: Request) {
           // Ordenamos alfabéticamente por el código de actividad
           .sort((a, b) => a.Name.localeCompare(b.Name));
 
-        sendLog(`[🎉] ¡Éxito! Navegador cerrado. ${listaOrdenada.length} códigos listos.`);
+        sendLog(`${listaOrdenada.length} códigos listos.`);
         sendSuccess(listaOrdenada);
         controller.close();
 
       } catch (error) {
-        sendLog(`[❌] ERROR CRÍTICO: El robot se ha detenido.`);
+        sendLog(`ERROR CRÍTICO: El motor se ha detenido.`);
         sendError(String(error));
         controller.close();
       }
