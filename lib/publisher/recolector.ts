@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import type { CanalNdjson } from '../ndjson';
 import { urlBaseDe } from '../plataformas';
 import type { ActividadRef, PlataformaId } from '../types';
+import { filtrarPorPrefijo } from './filtrado';
 import { comprobarSesionViva } from './login';
 import { conNavegador, crearContextoAutenticado } from './navegador';
 import { SELECTORES } from './selectores';
@@ -9,6 +10,8 @@ import { SELECTORES } from './selectores';
 /** Tope de seguridad para que una paginación que nunca se deshabilite no cuelgue el proceso. */
 const MAX_PAGINAS = 200;
 const TIMEOUT_ELEMENTO = 20_000;
+/** Cadencia con la que se comprueba si la tabla ha dejado de moverse. */
+const INTERVALO_SONDEO = 250;
 
 interface FilaListado {
   href: string;
@@ -36,6 +39,53 @@ function leerFilas(page: Page): Promise<FilaListado[]> {
   );
 }
 
+/**
+ * Huella del contenido de la tabla. Sirve para saber si ha cambiado y si ya ha
+ * dejado de moverse. Una sola definición: si el formato divergiera entre los dos
+ * puntos que la comparan, las huellas nunca coincidirían y la espera degradaría
+ * en silencio a un timeout.
+ */
+function huellaDe(filas: FilaListado[]): string {
+  return `${filas.length}:${filas.map((f) => f.guid).join(',')}`;
+}
+
+async function huellaTabla(page: Page): Promise<string> {
+  return huellaDe(await leerFilas(page));
+}
+
+/**
+ * Espera a que la tabla cambie respecto a `huellaPrevia` y luego se quede quieta.
+ *
+ * Hace falta porque el listado es una SPA: al aplicar el filtro las filas
+ * antiguas siguen en el DOM un instante. Esperar a "que aparezca una fila" no
+ * vale de nada —ya hay filas— y por eso la recolección llegó a devolver
+ * actividades de otros libros: se leía la tabla sin filtrar. La versión original
+ * lo tapaba durmiendo 3 segundos a ciegas; esto es correcto y además suele
+ * resolverse en medio segundo.
+ */
+async function esperarTablaEstable(
+  page: Page,
+  huellaPrevia: string,
+  canal: CanalNdjson<unknown>,
+): Promise<void> {
+  const limite = Date.now() + TIMEOUT_ELEMENTO;
+  let anterior = '';
+  let habiaCambiado = false;
+
+  while (Date.now() < limite) {
+    const actual = await huellaTabla(page);
+
+    if (actual !== huellaPrevia) habiaCambiado = true;
+    // Dos lecturas iguales seguidas = el refresco ha terminado.
+    if (habiaCambiado && actual === anterior) return;
+
+    anterior = actual;
+    await page.waitForTimeout(INTERVALO_SONDEO);
+  }
+
+  canal.log('Aviso: el listado no ha terminado de refrescarse a tiempo.');
+}
+
 /** Va al listado de actividades, sin pasar por el menú si se puede. */
 async function abrirListado(page: Page, urlBase: string, canal: CanalNdjson<unknown>): Promise<void> {
   await page.goto(`${urlBase}${SELECTORES.navegacion.rutaActividades}`, {
@@ -61,8 +111,9 @@ async function abrirListado(page: Page, urlBase: string, canal: CanalNdjson<unkn
  * Recolecta todas las actividades cuyo código cuelga de un código padre de libro.
  *
  * Arranca con la sesión ya establecida (`storageState`), así que no repite el
- * login. Las esperas son por elemento concreto, no `networkidle` + pausas fijas:
- * Playwright desaconseja `networkidle` y en una SPA es a la vez lento y flaky.
+ * login. En lugar de `networkidle` y pausas fijas, se espera al elemento
+ * concreto; la única excepción es el refresco de la tabla, que se detecta
+ * sondeando su contenido hasta que deja de cambiar (ver `esperarTablaEstable`).
  */
 export async function recolectarCodigos(opciones: {
   plataforma: PlataformaId;
@@ -84,16 +135,14 @@ export async function recolectarCodigos(opciones: {
 
     canal.log('Buscando el código padre...');
     const buscador = page.locator(SELECTORES.listado.buscador);
+
+    // Huella de la tabla SIN filtrar: es la referencia para saber que el filtro
+    // ya se ha aplicado de verdad.
+    const huellaSinFiltrar = await huellaTabla(page);
+
     await buscador.fill(codigoLibro);
     await buscador.press('Enter');
-
-    // Con resultados aparece al menos una fila; sin resultados no aparece ninguna
-    // y el bucle termina en la primera vuelta.
-    await page
-      .locator(SELECTORES.listado.filaActividad)
-      .first()
-      .waitFor({ state: 'visible', timeout: TIMEOUT_ELEMENTO })
-      .catch(() => canal.log('La búsqueda no ha devuelto resultados.'));
+    await esperarTablaEstable(page, huellaSinFiltrar, canal);
 
     // El GUID como clave descarta duplicados entre páginas.
     const recolectados = new Map<string, string>();
@@ -124,19 +173,9 @@ export async function recolectarCodigos(opciones: {
       }
 
       canal.log('Pasando a la siguiente página...');
-      const hrefAnterior = filas[0].href;
+      const huellaPagina = huellaDe(filas);
       await siguiente.click();
-
-      // Esperamos a que la tabla cambie de verdad, en lugar de dormir 2 segundos
-      // a ciegas y esperar que haya sido suficiente.
-      await page.waitForFunction(
-        ([selector, anterior]) => {
-          const primera = document.querySelector(selector);
-          return !!primera && primera.getAttribute('href') !== anterior;
-        },
-        [SELECTORES.listado.filaActividad, hrefAnterior] as const,
-        { timeout: TIMEOUT_ELEMENTO },
-      );
+      await esperarTablaEstable(page, huellaPagina, canal);
 
       pagina++;
     }
@@ -145,10 +184,19 @@ export async function recolectarCodigos(opciones: {
       canal.log(`Alcanzado el tope de ${MAX_PAGINAS} páginas: se detiene por seguridad.`);
     }
 
-    const lista: ActividadRef[] = Array.from(recolectados, ([guid, nombre]) => ({
+    const todos: ActividadRef[] = Array.from(recolectados, ([guid, nombre]) => ({
       'GUID/ERP': guid,
       Name: nombre,
-    })).sort((a, b) => a.Name.localeCompare(b.Name, 'es'));
+    }));
+
+    const lista = filtrarPorPrefijo(todos, codigoLibro);
+
+    const descartados = todos.length - lista.length;
+    if (descartados > 0) {
+      canal.log(
+        `Se descartan ${descartados} resultados que no empiezan por ${codigoLibro}.`,
+      );
+    }
 
     canal.log(`${lista.length} códigos listos.`);
     return lista;
