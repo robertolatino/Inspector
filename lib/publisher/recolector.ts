@@ -12,6 +12,11 @@ const MAX_PAGINAS = 200;
 const TIMEOUT_ELEMENTO = 20_000;
 /** Cadencia con la que se comprueba si la tabla ha dejado de moverse. */
 const INTERVALO_SONDEO = 250;
+/**
+ * Plazo para que el pie de paginación se repinte tras refrescarse la tabla.
+ * Corto a propósito: en la última página se paga entero.
+ */
+const TIMEOUT_PAGINACION = 4_000;
 
 interface FilaListado {
   href: string;
@@ -84,6 +89,55 @@ async function esperarTablaEstable(
   }
 
   canal.log('Aviso: el listado no ha terminado de refrescarse a tiempo.');
+}
+
+/**
+ * Radiografía de los controles de paginación.
+ *
+ * Sirve para diagnosticar por qué la recolección se detiene: la vista filtrada y
+ * la sin filtrar no se comportan igual, y el estado del botón "siguiente" es lo
+ * que decide si seguimos paginando.
+ */
+function radiografiarPaginacion(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const candidatos = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'ul.MuiPagination-ul button, .MuiTablePagination-root button, nav button, [class*="agination"] button',
+      ),
+    );
+    if (candidatos.length === 0) return 'sin controles de paginación en el DOM';
+
+    const botones = candidatos.map((b) => {
+      const etiqueta = b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '?';
+      const inerte = b.hasAttribute('disabled') || b.getAttribute('aria-disabled') === 'true';
+      return `${etiqueta}${inerte ? '[off]' : ''}`;
+    });
+
+    // El texto tipo "1-20 de 79" es la única fuente fiable del total.
+    const rotulo = document.querySelector('.MuiTablePagination-displayedRows')?.textContent?.trim();
+    return `${botones.join(' | ')}${rotulo ? ` :: "${rotulo}"` : ''}`;
+  });
+}
+
+/**
+ * Espera a que el botón "siguiente" quede utilizable.
+ *
+ * El pie de paginación se repinta después que la tabla: comprobar su estado en
+ * cuanto las filas dejan de moverse lo pillaba deshabilitado y la recolección se
+ * detenía en la primera página. Si de verdad es la última, esto solo cuesta el
+ * plazo corto de espera.
+ */
+async function esperarSiguienteUtilizable(page: Page): Promise<boolean> {
+  const limite = Date.now() + TIMEOUT_PAGINACION;
+  const siguiente = page.locator(SELECTORES.listado.siguientePagina).first();
+
+  while (Date.now() < limite) {
+    if ((await siguiente.isVisible().catch(() => false)) && !(await siguiente.isDisabled())) {
+      return true;
+    }
+    await page.waitForTimeout(INTERVALO_SONDEO);
+  }
+  return false;
 }
 
 /** Va al listado de actividades, sin pasar por el menú si se puede. */
@@ -166,15 +220,20 @@ export async function recolectarCodigos(opciones: {
         if (guid && nombre) recolectados.set(guid, nombre);
       }
 
-      const siguiente = page.locator(SELECTORES.listado.siguientePagina).first();
-      if (!(await siguiente.isVisible()) || (await siguiente.isDisabled())) {
-        canal.log('Última página alcanzada. Recolección finalizada.');
+      if (pagina === 1) {
+        canal.log(`Paginación: ${await radiografiarPaginacion(page)}`);
+      }
+
+      if (!(await esperarSiguienteUtilizable(page))) {
+        canal.log(
+          `Última página alcanzada (${recolectados.size} recogidos en ${pagina} página(s)).`,
+        );
         break;
       }
 
       canal.log('Pasando a la siguiente página...');
       const huellaPagina = huellaDe(filas);
-      await siguiente.click();
+      await page.locator(SELECTORES.listado.siguientePagina).first().click();
       await esperarTablaEstable(page, huellaPagina, canal);
 
       pagina++;
