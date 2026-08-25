@@ -10,6 +10,9 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // Los tests se ejecutan con `node --test` sobre los .ts directamente (Node 24
+    // los interpreta sin transpilador), y para eso el import lleva extensión.
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "jsx": "react-jsx",
     "incremental": true,

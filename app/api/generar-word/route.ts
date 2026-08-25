@@ -1,101 +1,68 @@
 import { NextResponse } from 'next/server';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
-import * as cheerio from 'cheerio';
+import { Document, HeadingLevel, Packer, Paragraph } from 'docx';
+import { htmlAParrafos } from '@/lib/html/aDocx';
+import { PLATAFORMAS } from '@/lib/plataformas';
+import { leerSesion } from '@/lib/session';
 
+/**
+ * Genera el Word con los enunciados extraídos.
+ *
+ * La conversión HTML → párrafos vive en `lib/html/aDocx` y está cubierta por
+ * tests: es la única parte del proyecto que es una función pura.
+ */
 export async function POST(request: Request) {
+  const sesion = await leerSesion();
+  if (!sesion) {
+    return NextResponse.json({ error: 'Sesión no válida. Vuelve a iniciar sesión.' }, { status: 401 });
+  }
+
+  const cuerpo = await request.json().catch(() => null);
+  const recibidos: unknown = cuerpo?.enunciados;
+
+  if (!Array.isArray(recibidos) || recibidos.length === 0) {
+    return NextResponse.json({ error: 'No hay datos para generar el documento.' }, { status: 400 });
+  }
+
   try {
-    const { resultados } = await request.json();
-
-    if (!resultados || resultados.length === 0) {
-      return NextResponse.json({ error: "No hay datos para generar el documento." }, { status: 400 });
-    }
-
-    const parrafosDoc: Paragraph[] = [];
-
-    // Título Principal
-    parrafosDoc.push(
-      new Paragraph({ 
-        text: "Enunciados Extraídos - Edelvives Digital Plus (EPD)", 
+    const contenido: Paragraph[] = [
+      new Paragraph({
+        text: `Enunciados extraídos — ${PLATAFORMAS[sesion.plataforma].nombre}`,
         heading: HeadingLevel.HEADING_1,
-        spacing: { after: 400 } 
-      })
-    );
+        spacing: { after: 400 },
+      }),
+    ];
 
-    for (const item of resultados) {
-      const codigo = item.codigo;
-      const htmlText = item.enunciadoHtml;
+    for (const item of recibidos) {
+      const codigo = typeof item?.codigo === 'string' ? item.codigo : '(sin código)';
+      const html = typeof item?.enunciadoHtml === 'string' ? item.enunciadoHtml : '';
 
-      parrafosDoc.push(
-        new Paragraph({ 
-          text: codigo, 
+      contenido.push(
+        new Paragraph({
+          text: codigo,
           heading: HeadingLevel.HEADING_2,
-          spacing: { before: 300, after: 100 }
-        })
+          spacing: { before: 300, after: 100 },
+        }),
       );
 
-      const fragmentosTexto: TextRun[] = [];
-
-      if (!htmlText || htmlText.startsWith("[")) {
-        fragmentosTexto.push(new TextRun({ text: htmlText || "[ERROR: Sin contenido]" }));
-      } else {
-        const $ = cheerio.load(htmlText);
-        
-        // Función recursiva que lee de izquierda a derecha manteniendo el orden perfecto
-        const procesarNodo = (nodo: any, isBold: boolean, isItalic: boolean, isUnderline: boolean) => {
-          if (nodo.type === 'text') {
-            // Limpiamos los saltos de línea invisibles del código fuente
-            const texto = nodo.data.replace(/\n/g, ''); 
-            if (texto) {
-              fragmentosTexto.push(new TextRun({ 
-                text: texto, 
-                bold: isBold, 
-                italics: isItalic, 
-                underline: isUnderline ? {} : undefined 
-              }));
-            }
-          } else if (nodo.type === 'tag') {
-            const b = isBold || nodo.name === 'b' || nodo.name === 'strong';
-            const i = isItalic || nodo.name === 'i' || nodo.name === 'em';
-            const u = isUnderline || nodo.name === 'u';
-            
-            // Procesamos los hijos en orden
-            $(nodo).contents().each((_, hijo) => {
-              procesarNodo(hijo, b, i, u);
-            });
-            
-            // Añadimos un espacio al terminar un párrafo para que las palabras no se peguen
-            if (nodo.name === 'p') {
-               fragmentosTexto.push(new TextRun({ text: " " }));
-            }
-          }
-        };
-
-        // Iniciamos la lectura desde la raíz
-        $('body').contents().each((_, hijo) => {
-          procesarNodo(hijo, false, false, false);
-        });
-      }
-
-      parrafosDoc.push(new Paragraph({ children: fragmentosTexto }));
-      parrafosDoc.push(new Paragraph({ text: "" })); // Espacio entre actividades
+      const parrafos = htmlAParrafos(html);
+      contenido.push(
+        ...(parrafos.length > 0 ? parrafos : [new Paragraph({ text: '[SIN CONTENIDO]' })]),
+      );
+      contenido.push(new Paragraph({ text: '' }));
     }
 
-    const doc = new Document({
-      sections: [{ properties: {}, children: parrafosDoc }]
-    });
+    const doc = new Document({ sections: [{ properties: {}, children: contenido }] });
+    const buffer = await Packer.toBuffer(doc);
 
-    const nodeBuffer = await Packer.toBuffer(doc);
-    const webBuffer = new Uint8Array(nodeBuffer);
-
-    return new Response(webBuffer, {
+    return new Response(new Uint8Array(buffer), {
       headers: {
-        'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'Content-Disposition': `attachment; filename="Enunciados_Extraidos.docx"`
-      }
+        'Content-Type':
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'Content-Disposition': 'attachment; filename="Enunciados_Extraidos.docx"',
+      },
     });
-
   } catch (error) {
-    console.error("Error generando Word:", error);
-    return NextResponse.json({ error: "Fallo al generar el documento." }, { status: 500 });
+    console.error('Error generando Word:', error);
+    return NextResponse.json({ error: 'Fallo al generar el documento.' }, { status: 500 });
   }
 }
