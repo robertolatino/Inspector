@@ -61,17 +61,23 @@ async function huellaTabla(page: Page): Promise<string> {
 /**
  * Espera a que la tabla cambie respecto a `huellaPrevia` y luego se quede quieta.
  *
- * Hace falta porque el listado es una SPA: al aplicar el filtro las filas
- * antiguas siguen en el DOM un instante. Esperar a "que aparezca una fila" no
- * vale de nada —ya hay filas— y por eso la recolección llegó a devolver
- * actividades de otros libros: se leía la tabla sin filtrar. La versión original
- * lo tapaba durmiendo 3 segundos a ciegas; esto es correcto y además suele
- * resolverse en medio segundo.
+ * Hace falta porque el listado es una SPA y las filas antiguas siguen en el DOM
+ * un instante: esperar a "que aparezca una fila" no vale de nada —ya hay filas—
+ * y por eso la recolección llegó a leer la tabla sin filtrar y devolver
+ * actividades de otros libros.
+ *
+ * `permitirVacia` es la otra mitad del problema. Al pasar de página la aplicación
+ * **vacía la tabla mientras carga**, y contar ese hueco como "cambió y está
+ * estable" hacía que la vuelta siguiente leyera cero filas y la recolección se
+ * detuviera a mitad (20 de 79). Salvo justo después de buscar —donde cero
+ * resultados es una respuesta legítima—, una tabla vacía significa "sigue
+ * cargando", no "ya está".
  */
 async function esperarTablaEstable(
   page: Page,
   huellaPrevia: string,
   canal: CanalNdjson<unknown>,
+  permitirVacia = false,
 ): Promise<void> {
   const limite = Date.now() + TIMEOUT_ELEMENTO;
   let anterior = '';
@@ -79,16 +85,20 @@ async function esperarTablaEstable(
 
   while (Date.now() < limite) {
     const actual = await huellaTabla(page);
+    const vacia = actual.startsWith('0:');
 
     if (actual !== huellaPrevia) habiaCambiado = true;
+
     // Dos lecturas iguales seguidas = el refresco ha terminado.
-    if (habiaCambiado && actual === anterior) return;
+    if (habiaCambiado && actual === anterior && (permitirVacia || !vacia)) return;
 
     anterior = actual;
     await page.waitForTimeout(INTERVALO_SONDEO);
   }
 
-  canal.log('Aviso: el listado no ha terminado de refrescarse a tiempo.');
+  if (!permitirVacia) {
+    canal.log('Aviso: el listado no ha terminado de cargar la página siguiente a tiempo.');
+  }
 }
 
 /**
@@ -116,6 +126,26 @@ function radiografiarPaginacion(page: Page): Promise<string> {
     // El texto tipo "1-20 de 79" es la única fuente fiable del total.
     const rotulo = document.querySelector('.MuiTablePagination-displayedRows')?.textContent?.trim();
     return `${botones.join(' | ')}${rotulo ? ` :: "${rotulo}"` : ''}`;
+  });
+}
+
+/**
+ * Último número de página que pinta el paginador ("1 … 6 7 8" → 8).
+ *
+ * Solo se usa para avisar si la recolección acaba antes de tiempo: no gobierna
+ * el bucle, que se guía por el botón "siguiente" como corresponde.
+ */
+function totalPaginas(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const numeros = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        'ul.MuiPagination-ul button, .MuiTablePagination-root button, nav button, [class*="agination"] button',
+      ),
+    )
+      .map((b) => Number.parseInt(b.textContent?.trim() ?? '', 10))
+      .filter((n) => Number.isFinite(n));
+
+    return numeros.length > 0 ? Math.max(...numeros) : 0;
   });
 }
 
@@ -196,11 +226,13 @@ export async function recolectarCodigos(opciones: {
 
     await buscador.fill(codigoLibro);
     await buscador.press('Enter');
-    await esperarTablaEstable(page, huellaSinFiltrar, canal);
+    // Tras buscar, cero resultados es una respuesta válida y no un estado de carga.
+    await esperarTablaEstable(page, huellaSinFiltrar, canal, true);
 
     // El GUID como clave descarta duplicados entre páginas.
     const recolectados = new Map<string, string>();
     let pagina = 1;
+    let paginasEsperadas = 0;
 
     while (pagina <= MAX_PAGINAS) {
       if (canal.cancelado()) {
@@ -221,7 +253,11 @@ export async function recolectarCodigos(opciones: {
       }
 
       if (pagina === 1) {
-        canal.log(`Paginación: ${await radiografiarPaginacion(page)}`);
+        paginasEsperadas = await totalPaginas(page);
+        canal.log(
+          `Paginación: ${await radiografiarPaginacion(page)}` +
+            (paginasEsperadas > 0 ? ` (${paginasEsperadas} páginas)` : ''),
+        );
       }
 
       if (!(await esperarSiguienteUtilizable(page))) {
@@ -241,6 +277,15 @@ export async function recolectarCodigos(opciones: {
 
     if (pagina > MAX_PAGINAS) {
       canal.log(`Alcanzado el tope de ${MAX_PAGINAS} páginas: se detiene por seguridad.`);
+    }
+
+    // Aviso explícito en lugar de dejar que el hueco se descubra contando en el
+    // Excel: es exactamente el fallo que se colaba antes.
+    if (paginasEsperadas > 0 && pagina < paginasEsperadas && !canal.cancelado()) {
+      canal.log(
+        `AVISO: el paginador anunciaba ${paginasEsperadas} páginas y solo se han recorrido ` +
+          `${pagina}. El resultado está incompleto.`,
+      );
     }
 
     const todos: ActividadRef[] = Array.from(recolectados, ([guid, nombre]) => ({
