@@ -1,4 +1,10 @@
-import { chromium } from 'playwright';
+import { chromium, type Browser } from 'playwright';
+
+// El scrape vive dentro de la petición: sin esto la plataforma la corta antes de terminar.
+export const maxDuration = 3600;
+
+// Tope de seguridad: si la paginación nunca se deshabilita, el bucle no se vuelve infinito.
+const MAX_PAGINAS = 200;
 
 export async function POST(request: Request) {
   const { url_base, usuario, contrasena, codigo_libro } = await request.json();
@@ -11,21 +17,31 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let browser: Browser | null = null;
+      let cerrado = false;
 
-      const sendLog = (msg: string) => {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'log', message: msg }) + '\n'));
+      // Si el cliente se va (pestaña cerrada, cancelación), dejamos de trabajar.
+      const cancelado = () => request.signal.aborted;
+
+      // Tras un abort el controller ya no acepta datos: enqueue lanzaría y taparía el error real.
+      const enviar = (payload: unknown) => {
+        if (cerrado || cancelado()) return;
+        controller.enqueue(encoder.encode(JSON.stringify(payload) + '\n'));
       };
-      const sendSuccess = (codigos: any[]) => {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'success', codigos }) + '\n'));
+      const cerrar = () => {
+        if (cerrado) return;
+        cerrado = true;
+        try { controller.close(); } catch { /* el cliente ya cerró el stream */ }
       };
-      const sendError = (error: string) => {
-        controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error }) + '\n'));
-      };
+
+      const sendLog = (msg: string) => enviar({ type: 'log', message: msg });
+      const sendSuccess = (codigos: any[]) => enviar({ type: 'success', codigos });
+      const sendError = (error: string) => enviar({ type: 'error', error });
 
       try {
         sendLog(`Iniciando motor de recolección para: ${codigo_libro}...`);
 
-        const browser = await chromium.launch({
+        browser = await chromium.launch({
           headless: true,
           args: [
             '--no-sandbox',                
@@ -72,7 +88,12 @@ export async function POST(request: Request) {
         const codigosRecolectados = new Map<string, string>();
         let paginaActual = 1;
 
-        while (true) {
+        while (paginaActual <= MAX_PAGINAS) {
+          if (cancelado()) {
+            sendLog(`Recolección cancelada por el usuario.`);
+            break;
+          }
+
           sendLog(`Analizando página ${paginaActual} de resultados...`);
 
           // Recogemos la etiqueta <a> entera para poder leer tanto el texto como el enlace
@@ -118,7 +139,9 @@ export async function POST(request: Request) {
           paginaActual++;
         }
 
-        await browser.close();
+        if (paginaActual > MAX_PAGINAS) {
+          sendLog(`Alcanzado el tope de ${MAX_PAGINAS} páginas: se detiene la recolección por seguridad.`);
+        }
 
         // Formateamos los resultados en un array de objetos y los ordenamos alfabéticamente por el nombre del código
         const listaOrdenada = Array.from(codigosRecolectados.entries())
@@ -131,12 +154,15 @@ export async function POST(request: Request) {
 
         sendLog(`${listaOrdenada.length} códigos listos.`);
         sendSuccess(listaOrdenada);
-        controller.close();
+        cerrar();
 
       } catch (error) {
         sendLog(`ERROR CRÍTICO: El motor se ha detenido.`);
         sendError(String(error));
-        controller.close();
+        cerrar();
+      } finally {
+        // Sin esto, cualquier fallo deja un Chromium huérfano comiéndose la memoria del contenedor.
+        await browser?.close().catch(() => { /* ya estaba cerrado */ });
       }
     }
   });

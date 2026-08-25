@@ -1,4 +1,7 @@
-import { chromium } from 'playwright';
+import { chromium, type Browser } from 'playwright';
+
+// El scrape vive dentro de la petición: sin esto la plataforma la corta antes de terminar.
+export const maxDuration = 3600;
 
 export async function POST(request: Request) {
   // Recibe el array de objetos del Excel: [{ "GUID/ERP": "...", "Name": "..." }]
@@ -12,14 +15,31 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const sendLog = (msg: string) => controller.enqueue(encoder.encode(JSON.stringify({ type: 'log', message: msg }) + '\n'));
-      const sendSuccess = (resultados: any[]) => controller.enqueue(encoder.encode(JSON.stringify({ type: 'success', resultados }) + '\n'));
-      const sendError = (error: string) => controller.enqueue(encoder.encode(JSON.stringify({ type: 'error', error }) + '\n'));
+      let browser: Browser | null = null;
+      let cerrado = false;
+
+      // Si el cliente se va (pestaña cerrada, cancelación), dejamos de trabajar.
+      const cancelado = () => request.signal.aborted;
+
+      // Tras un abort el controller ya no acepta datos: enqueue lanzaría y taparía el error real.
+      const enviar = (payload: unknown) => {
+        if (cerrado || cancelado()) return;
+        controller.enqueue(encoder.encode(JSON.stringify(payload) + '\n'));
+      };
+      const cerrar = () => {
+        if (cerrado) return;
+        cerrado = true;
+        try { controller.close(); } catch { /* el cliente ya cerró el stream */ }
+      };
+
+      const sendLog = (msg: string) => enviar({ type: 'log', message: msg });
+      const sendSuccess = (resultados: any[]) => enviar({ type: 'success', resultados });
+      const sendError = (error: string) => enviar({ type: 'error', error });
 
       try {
         sendLog(`[Extractor] Iniciando motor para ${codigos.length} enunciados...`);
 
-        const browser = await chromium.launch({
+        browser = await chromium.launch({
           headless: true,
           args: [
             '--no-sandbox',                
@@ -56,6 +76,11 @@ export async function POST(request: Request) {
 
         // --- BUCLE DE RECOLECCIÓN ---
         for (let i = 0; i < codigos.length; i++) {
+          if (cancelado()) {
+            sendLog(`Extracción cancelada por el usuario.`);
+            break;
+          }
+
           const item = codigos[i];
           const guid = item["GUID/ERP"];
           const codigo = item["Name"];
@@ -91,16 +116,17 @@ export async function POST(request: Request) {
           }
         }
 
-        await browser.close();
-
         sendLog(`Extracción completada. ${resultados.length} procesados.`);
         sendSuccess(resultados);
-        controller.close();
+        cerrar();
 
       } catch (error) {
         sendLog(`[❌] ERROR CRÍTICO en el Extractor.`);
         sendError(String(error));
-        controller.close();
+        cerrar();
+      } finally {
+        // Sin esto, cualquier fallo deja un Chromium huérfano comiéndose la memoria del contenedor.
+        await browser?.close().catch(() => { /* ya estaba cerrado */ });
       }
     }
   });

@@ -76,6 +76,10 @@ export default function Home() {
 
       const decoder = new TextDecoder();
       let isDone = false;
+      // Un chunk de red puede cortar un JSON por la mitad. Sin este buffer se perdía
+      // el mensaje más grande —el 'success' con todos los códigos— y la pantalla
+      // se quedaba vacía aunque la terminal ya hubiera anunciado el total.
+      let buffer = "";
 
       while (!isDone) {
         const { done, value } = await reader.read();
@@ -84,10 +88,15 @@ export default function Home() {
           break;
         }
 
-        const chunkString = decoder.decode(value, { stream: true });
-        const lineas = chunkString.split('\n').filter(line => line.trim() !== '');
+        buffer += decoder.decode(value, { stream: true });
 
-        for (const linea of lineas) {
+        const partes = buffer.split('\n');
+        // El último trozo puede estar incompleto: vuelve al buffer a esperar al siguiente chunk.
+        buffer = partes.pop() || "";
+
+        for (const linea of partes) {
+          if (!linea.trim()) continue;
+
           try {
             const data = JSON.parse(linea);
 
@@ -101,6 +110,20 @@ export default function Home() {
           } catch (e) {
             console.error("Error leyendo línea del stream:", linea);
           }
+        }
+      }
+
+      // Al cerrarse el stream puede quedar una línea sin '\n' final.
+      if (buffer.trim()) {
+        try {
+          const data = JSON.parse(buffer);
+          if (data.type === 'success') {
+            setCodigosExtraidos(data.codigos);
+          } else if (data.type === 'error') {
+            setRecolectorError(data.error);
+          }
+        } catch (e) {
+          console.error("Error procesando el bloque final:", e);
         }
       }
     } catch (error) {

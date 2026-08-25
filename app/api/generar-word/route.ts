@@ -33,9 +33,7 @@ export async function POST(request: Request) {
         })
       );
 
-      const fragmentosTexto: TextRun[] = [
-        new TextRun({ text: "", bold: true })
-      ];
+      const fragmentosTexto: TextRun[] = [];
 
       if (!htmlText || htmlText.startsWith("[")) {
         fragmentosTexto.push(new TextRun({ text: htmlText || "[ERROR: Sin contenido]" }));
