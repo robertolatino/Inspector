@@ -1,6 +1,7 @@
 import type { Page } from 'playwright';
 import { urlBaseDe } from '../plataformas';
 import type { PlataformaId } from '../types';
+import { reducirEstadoSesion } from './estadoSesion';
 import { conNavegador, crearContexto } from './navegador';
 import { SELECTORES } from './selectores';
 
@@ -61,7 +62,11 @@ export async function autenticar(
       );
     }
 
-    return JSON.stringify(await context.storageState());
+    // El estado completo del publisher es enorme (118 KB medidos en EPD) y no
+    // cabe en cookies: nos quedamos con el recorte más pequeño que se haya
+    // demostrado suficiente para seguir autenticado.
+    const completo = await context.storageState();
+    return JSON.stringify(await reducirEstadoSesion(browser, completo, urlBase));
   });
 }
 

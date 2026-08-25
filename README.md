@@ -110,7 +110,7 @@ lib/
 proxy.ts              Puerta de entrada (no es la frontera de seguridad)
 ```
 
-Dos notas para quien mantenga esto:
+Tres notas para quien mantenga esto:
 
 - **Los selectores del publisher cambian sin avisar.** Cuando la extracción
   empiece a fallar, el sitio a mirar es `lib/publisher/selectores.ts`, y debería
@@ -118,6 +118,15 @@ Dos notas para quien mantenga esto:
 - **La sesión no guarda la contraseña.** Guarda el `storageState` que devolvió la
   plataforma, sellado en una cookie `httpOnly`. La contraseña solo existe durante
   la petición de login.
+- **Ese `storageState` viene recortado, y el recorte se valida.** El publisher
+  devuelve 118 KB de estado, de los que el 96 % es caché de Redux-persist y
+  analítica que no autentica nada; en cookies eso provocaba un `431 Request
+  Header Fields Too Large` que dejaba la aplicación inutilizable. `lib/publisher/
+  estadoSesion.ts` se queda con la cookie y las claves que parecen de sesión, y
+  **comprueba abriendo un contexto nuevo que el recorte sigue entrando** antes de
+  guardarlo. Si algún día el publisher renombra su clave de sesión, el fallo
+  aparece en el login con las claves conservadas en el log, no a mitad de una
+  extracción.
 
 ## Despliegue
 

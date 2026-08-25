@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { esPlataformaId } from '@/lib/plataformas';
 import { autenticar, CredencialesInvalidasError } from '@/lib/publisher/login';
-import { guardarSesion } from '@/lib/session';
+import { guardarSesion, SesionDemasiadoGrandeError } from '@/lib/session';
 
 // El login abre un Chromium y espera al backoffice: necesita más que el margen por defecto.
 export const maxDuration = 120;
@@ -32,6 +32,10 @@ export async function POST(request: Request) {
   } catch (e) {
     if (e instanceof CredencialesInvalidasError) {
       return NextResponse.json({ error: e.message }, { status: 401 });
+    }
+    if (e instanceof SesionDemasiadoGrandeError) {
+      // Las credenciales eran correctas: lo que falla es dónde guardar la sesión.
+      return NextResponse.json({ error: e.message }, { status: 413 });
     }
     // Fallo de la plataforma o del navegador, no del usuario.
     return NextResponse.json(

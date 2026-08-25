@@ -12,9 +12,33 @@ export type { Sesion };
 const NOMBRE_COOKIE = 'edv_sesion';
 /** Margen por debajo del límite de ~4096 bytes por cookie de los navegadores. */
 const MAX_BYTES_TROZO = 3500;
-/** Tope de trozos: también es el rango que se limpia al escribir o cerrar sesión. */
-const MAX_TROZOS = 8;
+/**
+ * Tope de trozos, y también el rango que se limpia al escribir o cerrar sesión.
+ *
+ * El límite que manda aquí NO es el de 4 KB por cookie sino el del total de
+ * cabeceras de la petición: Node rechaza con 431 por encima de 16 KB, y el
+ * navegador devuelve TODAS las cookies en cada petición. Con 3 trozos el
+ * encabezado Cookie ronda los 10,5 KB, que deja margen para el resto.
+ */
+const MAX_TROZOS = 3;
 const DURACION_SEGUNDOS = 8 * 60 * 60;
+
+/**
+ * La sesión de la plataforma no cabe en cookies.
+ *
+ * Se lanza en lugar de escribir un encabezado que haría que el servidor
+ * rechazara con 431 todas las peticiones siguientes, incluida la de cargar la
+ * página: la aplicación quedaba inutilizable hasta borrar las cookies a mano.
+ */
+export class SesionDemasiadoGrandeError extends Error {
+  constructor(readonly bytes: number) {
+    super(
+      `La sesión de la plataforma ocupa ${bytes} bytes y no cabe en cookies ` +
+        `(máximo ${MAX_TROZOS * MAX_BYTES_TROZO}).`,
+    );
+    this.name = 'SesionDemasiadoGrandeError';
+  }
+}
 
 /** Nombre del primer trozo: lo usa `proxy.ts` para el chequeo barato de presencia. */
 export const COOKIE_SESION_PRIMER_TROZO = `${NOMBRE_COOKIE}.0`;
@@ -32,10 +56,19 @@ function partir(texto: string): string[] {
  * publisher puede pasar del límite de 4 KB de una sola cookie.
  */
 export async function guardarSesion(sesion: Sesion): Promise<void> {
-  const trozos = partir(sellar(sesion));
-  if (trozos.length > MAX_TROZOS) {
-    throw new Error(`La sesión no cabe en ${MAX_TROZOS} cookies (${trozos.length} trozos).`);
-  }
+  const sellado = sellar(sesion);
+
+  // Diagnóstico: el tamaño del storageState depende de la plataforma y es el dato
+  // que decide si este diseño sin estado en servidor es viable.
+  console.info(
+    '[sesion] storageState=%d B, sellado=%d B, trozos=%d',
+    sesion.storageState.length,
+    sellado.length,
+    Math.ceil(sellado.length / MAX_BYTES_TROZO),
+  );
+
+  const trozos = partir(sellado);
+  if (trozos.length > MAX_TROZOS) throw new SesionDemasiadoGrandeError(sellado.length);
 
   const store = await cookies();
   const opciones = {

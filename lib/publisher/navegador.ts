@@ -38,16 +38,19 @@ export function crearContexto(browser: Browser): Promise<BrowserContext> {
   return browser.newContext(OPCIONES_CONTEXTO);
 }
 
+/** Forma del `storageState` de Playwright, tomada de la propia librería. */
+export type EstadoAlmacen = Awaited<ReturnType<BrowserContext['storageState']>>;
+
 /**
  * Contexto ya autenticado a partir del `storageState` guardado en la sesión.
  * Evita repetir el login en cada ejecución.
  */
 export function crearContextoAutenticado(
   browser: Browser,
-  storageState: string,
+  storageState: string | EstadoAlmacen,
 ): Promise<BrowserContext> {
   return browser.newContext({
     ...OPCIONES_CONTEXTO,
-    storageState: JSON.parse(storageState),
+    storageState: typeof storageState === 'string' ? JSON.parse(storageState) : storageState,
   });
 }
