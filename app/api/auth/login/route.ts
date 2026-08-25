@@ -4,7 +4,7 @@ import { autenticar, CredencialesInvalidasError } from '@/lib/publisher/login';
 import { guardarSesion } from '@/lib/session';
 
 // El login abre un Chromium y espera al backoffice: necesita más que el margen por defecto.
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 /**
  * Valida las credenciales de verdad contra el publisher y sella la sesión.
