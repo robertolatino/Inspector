@@ -1,36 +1,126 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inspector
 
-## Getting Started
+Herramienta interna de Edelvives para la revisión editorial de contenidos
+digitales.
 
-First, run the development server:
+Automatiza el trabajo manual de entrar al backoffice (*publisher*) de **Edelvives
+Digital Plus** o **ByME Digital**, buscar las actividades de un libro una por una
+y copiar sus enunciados a mano. Inspector lo hace con un navegador headless
+(Playwright) usando **las credenciales del propio usuario**, y devuelve un Excel
+con los códigos y un Word con los enunciados listos para revisar.
+
+## Cómo se usa
+
+```
+Login → 1. Recolección → Excel → 2. Extracción → Word
+```
+
+1. **Login.** Usuario y contraseña del backoffice, más la plataforma. Las
+   credenciales se validan de verdad contra el publisher: si son incorrectas, no
+   se entra.
+
+2. **Recolección.** Se introduce el *código padre* del libro (por ejemplo
+   `225253_MAT1`). El robot busca en el listado de actividades, recorre todas las
+   páginas de resultados y devuelve la lista de actividades, descargable como
+   `.xlsx` con dos columnas:
+
+   | Columna | Contenido |
+   | --- | --- |
+   | `GUID/ERP` | Identificador de la actividad en la plataforma |
+   | `Name` | Código de la actividad |
+
+3. **Extracción.** Se sube ese Excel (o uno exportado desde **Tangerine**: las
+   columnas de sobra como `Position`, `Type` o `Page` se ignoran). El robot entra
+   al editor de cada actividad y extrae el HTML del enunciado. El resultado se
+   descarga como `.docx`.
+
+   Las imágenes de los enunciados no se pueden reproducir y aparecen como
+   `[IMAGEN]`. Las actividades sin enunciado o inaccesibles aparecen marcadas
+   como `[SIN ENUNCIADO EN EL EDITOR]` o `[ERROR DE NAVEGACIÓN]` en lugar de
+   desaparecer.
+
+4. **Análisis IA.** Todavía no implementado; la vista es una maqueta.
+
+Los resultados sobreviven a una recarga de la pestaña (`sessionStorage`), y
+cualquier ejecución en curso se puede cancelar: el servidor lo detecta y cierra
+su navegador.
+
+## Desarrollo
+
+Requiere **Node ≥ 20.9** (los tests necesitan Node ≥ 22, que ejecuta TypeScript
+sin transpilador).
+
+```bash
+npm install
+```
+
+```bash
+npx playwright install chromium
+```
+
+Crea un `.env.local` a partir de `.env.example` — `SESSION_SECRET` es
+obligatorio:
+
+```bash
+openssl rand -base64 48
+```
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+| Comando | Qué hace |
+| --- | --- |
+| `npm run dev` | Servidor de desarrollo en http://localhost:3000 |
+| `npm run build` | Build de producción (`output: 'standalone'`) |
+| `npm test` | Tests del conversor HTML → Word |
+| `npm run lint` | ESLint |
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+> `xlsx` se instala desde `cdn.sheetjs.com`, no desde npm: la última versión
+> publicada en npm (0.18.5) arrastra vulnerabilidades sin corregir. Instalar
+> requiere salida a ese host.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Estructura
 
-## Learn More
+```
+app/
+  page.tsx            Server Component: lee la sesión → login o panel
+  api/auth/*          Login (valida contra el publisher) y logout
+  api/recolector      Capa fina: valida y delega
+  api/extractor
+  api/generar-word
+components/           Vistas y piezas de interfaz
+hooks/
+  useNdjsonStream     Único lector del stream de progreso
+  useEstadoPersistido Estado que sobrevive a una recarga
+lib/
+  session.ts          Cookie de sesión sellada (AES-256-GCM)
+  plataformas.ts      Catálogo de plataformas; la URL la decide el servidor
+  ndjson.ts           Canal de progreso hacia el cliente
+  publisher/
+    selectores.ts     TODOS los selectores del backoffice, en un solo sitio
+    navegador.ts      Ciclo de vida del navegador
+    login.ts          Autenticación y detección de sesión caducada
+    recolector.ts     Motor del paso 1
+    extractor.ts      Motor del paso 2 (pool de pestañas)
+  html/
+    sanear.ts         Lista blanca antes de mostrar HTML de la plataforma
+    parseEnunciado.ts HTML → bloques (función pura, con tests)
+    aDocx.ts          Bloques → párrafos de Word
+proxy.ts              Puerta de entrada (no es la frontera de seguridad)
+```
 
-To learn more about Next.js, take a look at the following resources:
+Dos notas para quien mantenga esto:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Los selectores del publisher cambian sin avisar.** Cuando la extracción
+  empiece a fallar, el sitio a mirar es `lib/publisher/selectores.ts`, y debería
+  ser el único archivo que haya que tocar.
+- **La sesión no guarda la contraseña.** Guarda el `storageState` que devolvió la
+  plataforma, sellado en una cookie `httpOnly`. La contraseña solo existe durante
+  la petición de login.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Despliegue
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Cloud Run, con ajustes que no son los de por defecto (memoria, concurrencia 1,
+timeout). Está todo en [`DEPLOY.md`](DEPLOY.md), incluidos dos avisos que hay que
+leer antes de desplegar.

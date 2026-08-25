@@ -1,8 +1,16 @@
 node_modules
 .next
 out
+build
 .git
 .env*
+.claude
+tests
 README.md
+DEPLOY.md
+AGENTS.md
+CLAUDE.md
 Dockerfile
 .dockerignore
+firebase.json
+*.tsbuildinfo
