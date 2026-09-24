@@ -39,6 +39,8 @@ export const SELECTORES = {
      * sin avisar de por qué.
      */
     codigoEnFila: 'span.subtitle',
+    /** El título legible: respaldo cuando la fila no trae código ERP (`codigoEnFila` vacío). */
+    nombreEnFila: 'span',
     siguientePagina:
       'button[aria-label="Go to next page"], button[aria-label="Ir a la página siguiente"], ul.MuiPagination-ul li:last-child button',
   },

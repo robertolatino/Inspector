@@ -29,20 +29,32 @@ interface FilaListado {
  *
  * Antes se hacían dos llamadas al navegador por fila (`getAttribute` +
  * `innerText`): con 50 filas por página eran 100 idas y vueltas. Ahora es una.
+ *
+ * No todas las actividades tienen código ERP: si la fila no lo trae, el
+ * backoffice no deja la celda vacía de verdad, pinta un guion "-" literal
+ * como placeholder. Comprobar solo cadena vacía dejaba pasar ese guion como
+ * si fuera el código, y como ninguna fila empieza por "-" el filtro por
+ * prefijo (`filtrarPorPrefijo`) las descartaba todas sin avisar. Un guion (o
+ * varios) cuenta como "sin código": se usa el título legible en su lugar.
  */
 function leerFilas(page: Page): Promise<FilaListado[]> {
   return page.locator(SELECTORES.listado.filaActividad).evaluateAll(
-    (elementos, selectorCodigo) =>
+    (elementos, selectores) =>
       elementos.map((el) => {
         const href = el.getAttribute('href') ?? '';
+        const codigo = (el.querySelector(selectores.codigo)?.textContent ?? '').trim();
+        const sinCodigo = !codigo || /^-+$/.test(codigo);
+        const nombre = sinCodigo
+          ? (el.querySelector(selectores.nombre)?.textContent ?? el.textContent ?? '').trim()
+          : codigo;
         return {
           href,
           // El GUID es lo que va después del último '/'.
           guid: href.split('/').pop() ?? '',
-          nombre: (el.querySelector(selectorCodigo)?.textContent ?? el.textContent ?? '').trim(),
+          nombre,
         };
       }),
-    SELECTORES.listado.codigoEnFila,
+    { codigo: SELECTORES.listado.codigoEnFila, nombre: SELECTORES.listado.nombreEnFila },
   );
 }
 
