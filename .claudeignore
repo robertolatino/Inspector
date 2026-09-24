@@ -1,0 +1,28 @@
+# Dependencias instaladas: se derivan de package.json, no hace falta leerlas.
+node_modules/
+
+# Build de Next.js: generado, y muy grande (manifests, cache, servidor standalone).
+.next/
+out/
+build/
+
+# Lockfile: enorme y de solo lectura mecánica; consultar package.json en su lugar.
+package-lock.json
+
+# Metadatos de compilación incremental de TypeScript.
+*.tsbuildinfo
+next-env.d.ts
+
+# Control de versiones.
+.git/
+
+# Secretos y configuración de entorno: nunca deben entrar en el contexto.
+.env
+.env.*
+!.env.example
+
+# Iconos/imagenes de plantilla sin relación con el código de la app.
+public/*.svg
+
+# Repositorio Git a nivel de metadatos, cache de test, etc.
+coverage/

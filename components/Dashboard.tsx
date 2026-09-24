@@ -92,7 +92,7 @@ export function Dashboard({
 
         <div className="flex-1 overflow-auto p-8">
           {vista === 'recolector' && <RecolectorView />}
-          {vista === 'extractor' && <ExtractorView />}
+          {vista === 'extractor' && <ExtractorView plataforma={plataforma} />}
           {vista === 'analista' && <AnalistaPlaceholder />}
         </div>
       </main>

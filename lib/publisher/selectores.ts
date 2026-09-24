@@ -28,8 +28,17 @@ export const SELECTORES = {
 
   listado: {
     buscador: 'input[data-testid="search"]',
-    /** Cada <a> de esta celda es una actividad: el href lleva el GUID y el <span> el código. */
+    /** Cada <a> de esta celda es una actividad: el href lleva el GUID. */
     filaActividad: '.table-body-cell-subtitle a',
+    /**
+     * El <a> de una fila trae varios <span>: uno sin clase con el título
+     * legible ("Relaciona las palabras") y este, con el código real
+     * ("ENTRE_L1_LET_CQU_07"). Coger "el primer <span>" a secas devuelve el
+     * título en vez del código, y como el filtro por prefijo compara contra
+     * el código, ninguna fila coincide y la recolección vuelve 0 resultados
+     * sin avisar de por qué.
+     */
+    codigoEnFila: 'span.subtitle',
     siguientePagina:
       'button[aria-label="Go to next page"], button[aria-label="Ir a la página siguiente"], ul.MuiPagination-ul li:last-child button',
   },
@@ -39,6 +48,37 @@ export const SELECTORES = {
     bloqueEnunciado: 'div[data-id="stimulus"]',
     /** El textarea oculto del WYSIWYG: su `value` es el HTML real del enunciado. */
     textareaEnunciado: 'textarea',
+
+    /**
+     * Vista previa de la pregunta tal como la ve el alumno, sin marcar. Y su
+     * equivalente dentro de "Soluciones" → pestaña "Solución" (ya renderizada
+     * por defecto), con la clase `elementoSeleccionado` en la respuesta
+     * correcta cuando el tipo de plantilla lo permite. Ver
+     * `lib/publisher/analizarSolucion.ts` para cómo se interpretan.
+     */
+    vistaPreviaPregunta: '.lemo-question-preview',
+    vistaPreviaSolucion: '.lemo-solutions-preview',
+    elementoSeleccionado: '.lemo-selected',
+
+    /** Estructura de una pregunta en forma de matriz/tabla (p. ej. V/F en cuadrícula). */
+    tablaGrid: '.lemo-table-grid',
+    tablaFila: '.lemo-table-body-item',
+    tablaCeldaSeleccionada: '.lemo-question-response.lemo-row-cell.lemo-selected',
+
+    /**
+     * El campo "Nombre interno" es siempre el primer input de texto del
+     * editor, en las 12 plantillas comprobadas en vivo (desde Respuesta única
+     * hasta Matemáticas). Es el título legible de la actividad.
+     */
+    nombreInterno: 'input.lemo-editor-input-text',
+
+    /**
+     * El nodo raíz de la pregunta dentro de `vistaPreviaPregunta` lleva SIEMPRE
+     * dos clases: `lemo-question` y una segunda que identifica el tipo de
+     * plantilla (p. ej. `lemo-classify-linking-lines` = Unir). Ver
+     * `lib/publisher/tipoPlantilla.ts` para la traducción a un nombre legible.
+     */
+    tipoPregunta: '.lemo-question-preview .lemo-question',
   },
 } as const;
 

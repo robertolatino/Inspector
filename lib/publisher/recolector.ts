@@ -31,16 +31,18 @@ interface FilaListado {
  * `innerText`): con 50 filas por página eran 100 idas y vueltas. Ahora es una.
  */
 function leerFilas(page: Page): Promise<FilaListado[]> {
-  return page.locator(SELECTORES.listado.filaActividad).evaluateAll((elementos) =>
-    elementos.map((el) => {
-      const href = el.getAttribute('href') ?? '';
-      return {
-        href,
-        // El GUID es lo que va después del último '/'.
-        guid: href.split('/').pop() ?? '',
-        nombre: (el.querySelector('span')?.textContent ?? el.textContent ?? '').trim(),
-      };
-    }),
+  return page.locator(SELECTORES.listado.filaActividad).evaluateAll(
+    (elementos, selectorCodigo) =>
+      elementos.map((el) => {
+        const href = el.getAttribute('href') ?? '';
+        return {
+          href,
+          // El GUID es lo que va después del último '/'.
+          guid: href.split('/').pop() ?? '',
+          nombre: (el.querySelector(selectorCodigo)?.textContent ?? el.textContent ?? '').trim(),
+        };
+      }),
+    SELECTORES.listado.codigoEnFila,
   );
 }
 

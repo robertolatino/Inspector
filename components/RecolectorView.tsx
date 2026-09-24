@@ -82,6 +82,17 @@ export function RecolectorView() {
 
       {ejecutando ? (
         <Terminal logs={logs} />
+      ) : codigos.length === 0 && logs.length > 0 ? (
+        // Terminó pero no encontró nada: antes esto se veía IGUAL que "aún no
+        // has buscado", así que parecía que el botón de descarga había
+        // desaparecido. Se muestra el aviso y se conserva la terminal de esa
+        // ejecución para poder ver por qué no hubo resultados.
+        <div className="space-y-6">
+          <div className="border-2 border-dashed border-amber-300 bg-amber-50 rounded-lg p-6 text-center text-amber-700">
+            No se ha encontrado ninguna actividad para el código introducido.
+          </div>
+          <Terminal logs={logs} />
+        </div>
       ) : codigos.length > 0 ? (
         <div className="space-y-6">
           <div className="border-2 border-dashed border-emerald-300 bg-emerald-50 rounded-lg p-8 flex flex-col items-center justify-center text-center">

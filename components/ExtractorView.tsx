@@ -4,22 +4,60 @@ import { useState } from 'react';
 import * as XLSX from 'xlsx';
 import { useEstadoPersistido } from '@/hooks/useEstadoPersistido';
 import { useNdjsonStream } from '@/hooks/useNdjsonStream';
-import { esActividadRef, type ActividadRef, type EnunciadoExtraido } from '@/lib/types';
+import {
+  esActividadRef,
+  type ActividadCompleta,
+  type ActividadRef,
+  type EnunciadoExtraido,
+  type ModoExtraccion,
+  type PlataformaId,
+} from '@/lib/types';
 import { Aviso, Reposo } from './Aviso';
 import { Terminal } from './Terminal';
 
+type Resultado = EnunciadoExtraido[] | ActividadCompleta[];
+
 /** Referencia estable: `useEstadoPersistido` compara identidades. */
-const SIN_ENUNCIADOS: EnunciadoExtraido[] = [];
+const SIN_RESULTADO: { modo: ModoExtraccion; datos: Resultado } = {
+  modo: 'solo-enunciado',
+  datos: [],
+};
+
+/**
+ * El modo "toda la información" solo se ha verificado en vivo contra el DOM
+ * de EPD; en ByME se queda fijo en "solo enunciados" hasta comprobarlo.
+ */
+const PLATAFORMAS_CON_MODO_COMPLETO: PlataformaId[] = ['EPD'];
+
+/** Quita las capturas antes de persistir — ver el comentario en el estado. */
+function aligerar(modo: ModoExtraccion, datos: Resultado): Resultado {
+  if (modo !== 'completo') return datos;
+  return (datos as ActividadCompleta[]).map((actividad) => ({
+    ...actividad,
+    capturaBase64: null,
+    capturaAncho: null,
+    capturaAlto: null,
+  }));
+}
 
 /** Paso 2: subir el Excel de actividades y extraer sus enunciados. */
-export function ExtractorView() {
+export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
   const [actividades, setActividades] = useState<ActividadRef[]>([]);
-  const [enunciados, setEnunciados] = useEstadoPersistido<EnunciadoExtraido[]>(
-    'inspector.enunciados',
-    SIN_ENUNCIADOS,
-  );
+  const [modo, setModo] = useState<ModoExtraccion>('solo-enunciado');
+  const [resultado, setResultado] = useEstadoPersistido('inspector.enunciados', SIN_RESULTADO);
+  // Las capturas de pantalla NO se persisten (ver `aligerar`): pesan varios KB
+  // cada una y `sessionStorage` tiene una cuota de unos 5-10 MB. Si la escritura
+  // fallara por cuota, `useEstadoPersistido` volvería a leer lo último que sí
+  // cupo, así que un lote grande con imágenes podía hacer "desaparecer" el
+  // resultado justo después de terminar la extracción. Se guardan aparte, solo
+  // en memoria: sobreviven hasta que se recarga la pestaña, que es cuando hace
+  // falta volver a extraer de todos modos.
+  const [datosCompletos, setDatosCompletos] = useState<Resultado | null>(null);
   const [errorLocal, setErrorLocal] = useState('');
-  const { logs, error, ejecutando, ejecutar, cancelar } = useNdjsonStream<EnunciadoExtraido[]>();
+  const { logs, error, ejecutando, ejecutar, cancelar } = useNdjsonStream<Resultado>();
+
+  const permiteModoCompleto = PLATAFORMAS_CON_MODO_COMPLETO.includes(plataforma);
+  const { datos: enunciados } = resultado;
 
   const cargarExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
     const archivo = e.target.files?.[0];
@@ -61,19 +99,35 @@ export function ExtractorView() {
   };
 
   const extraer = async () => {
-    setEnunciados([]);
-    const resultado = await ejecutar('/api/extractor', { actividades });
-    if (resultado) setEnunciados(resultado);
+    setResultado({ modo, datos: [] });
+    setDatosCompletos(null);
+    const datos = await ejecutar('/api/extractor', { actividades, modo });
+    if (datos) {
+      setDatosCompletos(datos);
+      setResultado({ modo, datos: aligerar(modo, datos) });
+    }
   };
+
+  // Con capturas: `datosCompletos` (memoria, esta pestaña). Sin ellas —tras
+  // recargar la página, por ejemplo—: lo que haya persistido, que sigue
+  // teniendo enunciado y respuesta, solo que sin vista previa visual.
+  const huboRecargaConImagenesPerdidas =
+    resultado.modo === 'completo' && enunciados.length > 0 && datosCompletos === null;
 
   const descargarWord = async () => {
     setErrorLocal('');
 
     try {
+      const datos = datosCompletos ?? resultado.datos;
+      const cuerpo =
+        resultado.modo === 'completo'
+          ? { modo: resultado.modo, actividades: datos }
+          : { modo: resultado.modo, enunciados: datos };
+
       const respuesta = await fetch('/api/generar-word', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enunciados }),
+        body: JSON.stringify(cuerpo),
       });
 
       if (!respuesta.ok) {
@@ -127,6 +181,18 @@ export function ExtractorView() {
         </div>
 
         <div className="flex items-center space-x-3">
+          {permiteModoCompleto ? (
+            <select
+              value={modo}
+              onChange={(e) => setModo(e.target.value as ModoExtraccion)}
+              disabled={ejecutando}
+              className="border border-slate-300 rounded-md px-3 py-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#2a40b3] disabled:cursor-not-allowed disabled:bg-slate-100"
+            >
+              <option value="solo-enunciado">Solo enunciados</option>
+              <option value="completo">Toda la información</option>
+            </select>
+          ) : null}
+
           {ejecutando ? (
             <button
               onClick={cancelar}
@@ -165,7 +231,8 @@ export function ExtractorView() {
                 <span className="mr-2">✓</span> Extracción completada
               </h3>
               <p className="text-emerald-600">
-                Se han extraído {enunciados.length} enunciados con éxito.
+                Se han extraído {enunciados.length}{' '}
+                {resultado.modo === 'completo' ? 'actividades' : 'enunciados'} con éxito.
               </p>
             </div>
             <button
@@ -175,6 +242,13 @@ export function ExtractorView() {
               Descargar Word (.docx)
             </button>
           </div>
+
+          {huboRecargaConImagenesPerdidas ? (
+            <div className="p-3 bg-amber-50 text-amber-700 text-sm rounded-lg border border-amber-200">
+              Esta página se ha recargado: el Word se generará sin la vista previa visual de cada
+              actividad. Vuelve a pulsar &ldquo;Iniciar&rdquo; si la necesitas.
+            </div>
+          ) : null}
 
           <div className="border border-slate-200 rounded-lg">
             <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
