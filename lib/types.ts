@@ -38,66 +38,36 @@ export function esActividadRef(valor: unknown): valor is ActividadRef {
 }
 
 /**
- * `solo-enunciado` es el comportamiento de siempre. `completo` añade opciones y,
- * cuando el tipo de plantilla lo permite, cuál es la correcta — ver
- * `lib/publisher/analizarSolucion.ts` para cómo se detecta.
+ * `solo-enunciado` es el comportamiento de siempre. `completo` añade el tipo
+ * de plantilla, una captura visual y el texto del ejercicio (ver
+ * `ActividadCompleta`). `captura` es la versión ligera: solo la captura
+ * visual, sin leer enunciado ni tipo (ver `ActividadCaptura`).
  */
-export type ModoExtraccion = 'solo-enunciado' | 'completo';
+export type ModoExtraccion = 'solo-enunciado' | 'completo' | 'captura';
 
-/**
- * Cómo se ha reconocido la respuesta correcta de una actividad en modo
- * `completo`. No se deriva del tipo de plantilla (el backoffice no lo expone de
- * forma fiable) sino de la forma del DOM del editor: ver
- * `lib/publisher/analizarSolucion.ts`.
- */
-export type PatronRespuesta =
-  | 'opciones' // .lemo-selected con texto: respuesta única, múltiple, V/F...
-  | 'tabla' // matriz/posicional: la celda marcada no lleva texto
-  | 'relleno' // hueco recuperado por diferencia entre pregunta y solución
-  | 'desplegable' // opción elegida dentro de un desplegable
-  | 'orden' // el orden de la solución es la respuesta
-  | 'sin_solucion'; // sin señal automática: solo se guarda lo visible
-
-export interface OpcionRespuesta {
-  /** HTML ya saneado con `sanearHtmlEnunciado`. */
-  html: string;
-  correcta: boolean;
+/** Captura de la vista previa en JPEG (base64, sin el prefijo data:) más sus
+ * dimensiones reales, para no deformarla al incrustarla en el Word. Todo
+ * `null` cuando no se pudo capturar. */
+export interface Captura {
+  capturaBase64: string | null;
+  capturaAncho: number | null;
+  capturaAlto: number | null;
 }
 
-export interface FilaTabla {
-  /** HTML ya saneado de cada celda, en orden de columna. */
-  celdas: string[];
-  columnaCorrecta: number | null;
-}
-
-export interface DetalleCompleto {
-  patron: PatronRespuesta;
-  /** 'opciones' | 'desplegable' */
-  opciones?: OpcionRespuesta[];
-  /** 'tabla' */
-  tabla?: { cabecera: string[]; filas: FilaTabla[] };
-  /** 'relleno' */
-  relleno?: string[];
-  /** 'orden' */
-  orden?: string[];
-  /** 'sin_solucion': HTML visible tal cual, ya saneado. */
-  contenidoSinSolucion?: string;
-}
-
-export interface ActividadCompleta {
+export interface ActividadCompleta extends Captura {
   codigo: string;
-  /** "Nombre interno" de la actividad (el título legible, p. ej. "Relaciona las palabras"). */
-  nombre: string;
   /** Nombre legible del tipo de plantilla (p. ej. "Unir"). Ver `lib/publisher/tipoPlantilla.ts`. */
   tipoPlantilla: string;
   enunciadoHtml: string;
-  /** null solo en error de navegación o editor sin enunciado, igual que hoy. */
-  detalle: DetalleCompleto | null;
-  /** Captura de la vista previa en JPEG (base64, sin el prefijo data:). null si no se pudo capturar. */
-  capturaBase64: string | null;
-  /** Dimensiones reales de la captura en píxeles, para no deformarla al incrustarla en el Word. */
-  capturaAncho: number | null;
-  capturaAlto: number | null;
+  /**
+   * HTML de `[data-testid="questionBase"]`, ya saneado, tal cual aparece en el
+   * backoffice — sin interpretar por tipo de plantilla. Se prefiere el de
+   * "Soluciones" (no repite el enunciado y no viene desordenado); si la
+   * actividad no tiene panel de soluciones se usa el de la vista previa. null
+   * si no se pudo leer ninguno de los dos. En el Word se muestra sin rótulo
+   * propio, pegado al enunciado.
+   */
+  ejercicioHtml: string | null;
 }
 
 /** Análoga a `esActividadRef`, para lo que devuelve el modo `completo`. */
@@ -105,6 +75,18 @@ export function esActividadCompleta(valor: unknown): valor is ActividadCompleta 
   if (typeof valor !== 'object' || valor === null) return false;
   const fila = valor as Record<string, unknown>;
   return typeof fila.codigo === 'string' && typeof fila.enunciadoHtml === 'string';
+}
+
+/** Lo que devuelve el modo `captura`: nada más que el código y la imagen. */
+export interface ActividadCaptura extends Captura {
+  codigo: string;
+}
+
+/** Análoga a `esActividadRef`, para lo que devuelve el modo `captura`. */
+export function esActividadCaptura(valor: unknown): valor is ActividadCaptura {
+  if (typeof valor !== 'object' || valor === null) return false;
+  const fila = valor as Record<string, unknown>;
+  return typeof fila.codigo === 'string';
 }
 
 /** Protocolo del stream NDJSON: una línea de JSON por mensaje. */

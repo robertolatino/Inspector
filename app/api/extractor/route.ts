@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server';
 import { respuestaNdjson } from '@/lib/ndjson';
-import { extraerActividadesCompletas, extraerEnunciados } from '@/lib/publisher/extractor';
+import { extraerActividadesCompletas, extraerCapturas, extraerEnunciados } from '@/lib/publisher/extractor';
 import { leerSesion } from '@/lib/session';
-import { esActividadRef, type ActividadCompleta, type EnunciadoExtraido, type ModoExtraccion } from '@/lib/types';
+import {
+  esActividadRef,
+  type ActividadCaptura,
+  type ActividadCompleta,
+  type EnunciadoExtraido,
+  type ModoExtraccion,
+} from '@/lib/types';
 
 // El scrape vive dentro de la petición: sin esto la plataforma la corta antes de terminar.
 export const maxDuration = 3600;
@@ -24,7 +30,8 @@ export async function POST(request: Request) {
 
   const cuerpo = await request.json().catch(() => null);
   const recibidas: unknown = cuerpo?.actividades;
-  const modo: ModoExtraccion = cuerpo?.modo === 'completo' ? 'completo' : 'solo-enunciado';
+  const modo: ModoExtraccion =
+    cuerpo?.modo === 'completo' || cuerpo?.modo === 'captura' ? cuerpo.modo : 'solo-enunciado';
 
   if (!Array.isArray(recibidas) || recibidas.length === 0) {
     return NextResponse.json({ error: 'La lista de actividades está vacía.' }, { status: 400 });
@@ -35,11 +42,11 @@ export async function POST(request: Request) {
       { status: 413 },
     );
   }
-  // El modo completo se ha verificado en vivo solo contra EPD: en ByME podría
-  // no reconocer nada y devolver únicamente "sin solución automática".
-  if (modo === 'completo' && sesion.plataforma !== 'EPD') {
+  // Los modos completo y captura se han verificado en vivo solo contra EPD:
+  // en ByME podrían no reconocer nada.
+  if (modo !== 'solo-enunciado' && sesion.plataforma !== 'EPD') {
     return NextResponse.json(
-      { error: 'El modo "toda la información" todavía no está disponible para ByME Digital.' },
+      { error: `El modo "${modo}" todavía no está disponible para ByME Digital.` },
       { status: 400 },
     );
   }
@@ -66,6 +73,23 @@ export async function POST(request: Request) {
 
       canal.exito(
         await extraerActividadesCompletas({
+          plataforma: sesion.plataforma,
+          storageState: sesion.storageState,
+          actividades,
+          canal,
+        }),
+      );
+    });
+  }
+
+  if (modo === 'captura') {
+    return respuestaNdjson<ActividadCaptura[]>(request.signal, async (canal) => {
+      if (actividades.length < recibidas.length) {
+        canal.log(`Se han descartado ${recibidas.length - actividades.length} filas sin GUID/ERP o Name.`);
+      }
+
+      canal.exito(
+        await extraerCapturas({
           plataforma: sesion.plataforma,
           storageState: sesion.storageState,
           actividades,

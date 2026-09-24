@@ -7,8 +7,8 @@
  * editor—, pero cada pregunta sí lleva esta clase interna. El mapa de abajo es
  * el resultado de comprobar en vivo una docena de tipos reales; no cubre los
  * 23. Un tipo sin mapear no rompe nada: se humaniza la clase tal cual (ver
- * `humanizar`) y se registra para poder ampliar el mapa con el tiempo — mismo
- * criterio que el aviso "[?] patrón no reconocido" de `analizarSolucion.ts`.
+ * `humanizar`) y se registra (parámetro `avisar`) para poder ampliar el mapa
+ * con el tiempo en vez de adivinar de antemano.
  */
 const NOMBRES_TIPO: Record<string, string> = {
   'lemo-multiple-choice': 'Selección de opción',

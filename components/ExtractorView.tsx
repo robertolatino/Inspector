@@ -6,6 +6,7 @@ import { useEstadoPersistido } from '@/hooks/useEstadoPersistido';
 import { useNdjsonStream } from '@/hooks/useNdjsonStream';
 import {
   esActividadRef,
+  type ActividadCaptura,
   type ActividadCompleta,
   type ActividadRef,
   type EnunciadoExtraido,
@@ -15,7 +16,7 @@ import {
 import { Aviso, Reposo } from './Aviso';
 import { Terminal } from './Terminal';
 
-type Resultado = EnunciadoExtraido[] | ActividadCompleta[];
+type Resultado = EnunciadoExtraido[] | ActividadCompleta[] | ActividadCaptura[];
 
 /** Referencia estable: `useEstadoPersistido` compara identidades. */
 const SIN_RESULTADO: { modo: ModoExtraccion; datos: Resultado } = {
@@ -24,20 +25,21 @@ const SIN_RESULTADO: { modo: ModoExtraccion; datos: Resultado } = {
 };
 
 /**
- * El modo "toda la información" solo se ha verificado en vivo contra el DOM
- * de EPD; en ByME se queda fijo en "solo enunciados" hasta comprobarlo.
+ * "Toda la información" y "solo captura" solo se han verificado en vivo
+ * contra el DOM de EPD; en ByME se quedan fijos en "solo enunciados" hasta
+ * comprobarlo.
  */
-const PLATAFORMAS_CON_MODO_COMPLETO: PlataformaId[] = ['EPD'];
+const PLATAFORMAS_CON_MODOS_AVANZADOS: PlataformaId[] = ['EPD'];
 
 /** Quita las capturas antes de persistir — ver el comentario en el estado. */
 function aligerar(modo: ModoExtraccion, datos: Resultado): Resultado {
-  if (modo !== 'completo') return datos;
-  return (datos as ActividadCompleta[]).map((actividad) => ({
+  if (modo === 'solo-enunciado') return datos;
+  return (datos as (ActividadCompleta | ActividadCaptura)[]).map((actividad) => ({
     ...actividad,
     capturaBase64: null,
     capturaAncho: null,
     capturaAlto: null,
-  }));
+  })) as Resultado;
 }
 
 /** Paso 2: subir el Excel de actividades y extraer sus enunciados. */
@@ -56,7 +58,7 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
   const [errorLocal, setErrorLocal] = useState('');
   const { logs, error, ejecutando, ejecutar, cancelar } = useNdjsonStream<Resultado>();
 
-  const permiteModoCompleto = PLATAFORMAS_CON_MODO_COMPLETO.includes(plataforma);
+  const permiteModosAvanzados = PLATAFORMAS_CON_MODOS_AVANZADOS.includes(plataforma);
   const { datos: enunciados } = resultado;
 
   const cargarExcel = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -110,9 +112,10 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
 
   // Con capturas: `datosCompletos` (memoria, esta pestaña). Sin ellas —tras
   // recargar la página, por ejemplo—: lo que haya persistido, que sigue
-  // teniendo enunciado y respuesta, solo que sin vista previa visual.
+  // teniendo enunciado y respuesta, solo que sin vista previa visual (y en
+  // modo "captura", sin nada: ahí la imagen es todo el contenido).
   const huboRecargaConImagenesPerdidas =
-    resultado.modo === 'completo' && enunciados.length > 0 && datosCompletos === null;
+    resultado.modo !== 'solo-enunciado' && enunciados.length > 0 && datosCompletos === null;
 
   const descargarWord = async () => {
     setErrorLocal('');
@@ -120,9 +123,9 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
     try {
       const datos = datosCompletos ?? resultado.datos;
       const cuerpo =
-        resultado.modo === 'completo'
-          ? { modo: resultado.modo, actividades: datos }
-          : { modo: resultado.modo, enunciados: datos };
+        resultado.modo === 'solo-enunciado'
+          ? { modo: resultado.modo, enunciados: datos }
+          : { modo: resultado.modo, actividades: datos };
 
       const respuesta = await fetch('/api/generar-word', {
         method: 'POST',
@@ -181,7 +184,7 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
         </div>
 
         <div className="flex items-center space-x-3">
-          {permiteModoCompleto ? (
+          {permiteModosAvanzados ? (
             <select
               value={modo}
               onChange={(e) => setModo(e.target.value as ModoExtraccion)}
@@ -190,6 +193,7 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
             >
               <option value="solo-enunciado">Solo enunciados</option>
               <option value="completo">Toda la información</option>
+              <option value="captura">Solo captura</option>
             </select>
           ) : null}
 
@@ -232,7 +236,12 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
               </h3>
               <p className="text-emerald-600">
                 Se han extraído {enunciados.length}{' '}
-                {resultado.modo === 'completo' ? 'actividades' : 'enunciados'} con éxito.
+                {resultado.modo === 'solo-enunciado'
+                  ? 'enunciados'
+                  : resultado.modo === 'captura'
+                    ? 'capturas'
+                    : 'actividades'}{' '}
+                con éxito.
               </p>
             </div>
             <button
@@ -252,7 +261,7 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
 
           <div className="border border-slate-200 rounded-lg">
             <div className="bg-slate-50 p-3 border-b border-slate-200 text-sm font-medium text-slate-700">
-              Vista previa de enunciados
+              Vista previa de resultados
             </div>
             <div className="p-4 h-96 overflow-y-auto bg-slate-50 text-sm text-slate-600 space-y-4 shadow-inner">
               {enunciados.map((item, idx) => (
@@ -267,12 +276,17 @@ export function ExtractorView({ plataforma }: { plataforma: PlataformaId }) {
                   {/*
                     El HTML llega ya saneado desde el servidor (lib/html/sanear):
                     lista blanca de etiquetas, sin atributos `on*` ni etiquetas
-                    ejecutables.
+                    ejecutables. En modo "captura" no hay enunciado que mostrar
+                    aquí — el contenido es la imagen que va directa al Word.
                   */}
-                  <div
-                    className="text-sm text-slate-700 prose prose-sm max-w-none [&_p]:m-0 [&_p]:mb-1"
-                    dangerouslySetInnerHTML={{ __html: item.enunciadoHtml }}
-                  />
+                  {'enunciadoHtml' in item ? (
+                    <div
+                      className="text-sm text-slate-700 prose prose-sm max-w-none [&_p]:m-0 [&_p]:mb-1"
+                      dangerouslySetInnerHTML={{ __html: item.enunciadoHtml }}
+                    />
+                  ) : (
+                    <p className="text-sm text-slate-400 italic">Captura lista (se incluye en el Word).</p>
+                  )}
                 </div>
               ))}
             </div>

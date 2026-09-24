@@ -50,27 +50,12 @@ export const SELECTORES = {
     textareaEnunciado: 'textarea',
 
     /**
-     * Vista previa de la pregunta tal como la ve el alumno, sin marcar. Y su
-     * equivalente dentro de "Soluciones" → pestaña "Solución" (ya renderizada
-     * por defecto), con la clase `elementoSeleccionado` en la respuesta
-     * correcta cuando el tipo de plantilla lo permite. Ver
-     * `lib/publisher/analizarSolucion.ts` para cómo se interpretan.
+     * Vista previa de la pregunta tal como la ve el alumno. Y su equivalente
+     * dentro de "Soluciones" → pestaña "Solución" (ya renderizada por
+     * defecto).
      */
     vistaPreviaPregunta: '.lemo-question-preview',
     vistaPreviaSolucion: '.lemo-solutions-preview',
-    elementoSeleccionado: '.lemo-selected',
-
-    /** Estructura de una pregunta en forma de matriz/tabla (p. ej. V/F en cuadrícula). */
-    tablaGrid: '.lemo-table-grid',
-    tablaFila: '.lemo-table-body-item',
-    tablaCeldaSeleccionada: '.lemo-question-response.lemo-row-cell.lemo-selected',
-
-    /**
-     * El campo "Nombre interno" es siempre el primer input de texto del
-     * editor, en las 12 plantillas comprobadas en vivo (desde Respuesta única
-     * hasta Matemáticas). Es el título legible de la actividad.
-     */
-    nombreInterno: 'input.lemo-editor-input-text',
 
     /**
      * El nodo raíz de la pregunta dentro de `vistaPreviaPregunta` lleva SIEMPRE
@@ -79,6 +64,25 @@ export const SELECTORES = {
      * `lib/publisher/tipoPlantilla.ts` para la traducción a un nombre legible.
      */
     tipoPregunta: '.lemo-question-preview .lemo-question',
+
+    /**
+     * El cuerpo del ejercicio (categorías, opciones, palabras...), sin el
+     * enunciado ni el botón "Comprobar". Existe una copia dentro de
+     * `vistaPreviaPregunta` (como la ve el alumno, desordenada) y otra dentro
+     * de `vistaPreviaSolucion` (limpia, sin desordenar) — se prefiere esta
+     * última. Ver `extraerBloqueCompleto` en `lib/publisher/extractor.ts`.
+     */
+    ejercicio: '[data-testid="questionBase"]',
+
+    /**
+     * Barra inferior "Salir/Guardar". Es `position: sticky`, así que en
+     * actividades con una vista previa alta (varias frases, muchas fichas...)
+     * su borde inferior cae en la misma región de pantalla donde esta barra
+     * está pintada, y la captura de `vistaPreviaPregunta` se la lleva por
+     * delante. Se oculta justo antes de capturar — ver `capturarVistaPrevia`
+     * en `lib/publisher/extractor.ts`.
+     */
+    piePagina: '.step-footer',
   },
 } as const;
 

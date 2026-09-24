@@ -1,9 +1,8 @@
-import type { BrowserContext, Page } from 'playwright';
+import type { BrowserContext, Locator, Page } from 'playwright';
 import { sanearHtmlEnunciado } from '../html/sanear';
 import type { CanalNdjson } from '../ndjson';
 import { urlBaseDe } from '../plataformas';
-import type { ActividadCompleta, ActividadRef, EnunciadoExtraido, PlataformaId } from '../types';
-import { analizarSolucion } from './analizarSolucion';
+import type { ActividadCaptura, ActividadCompleta, ActividadRef, Captura, EnunciadoExtraido, PlataformaId } from '../types';
 import { comprobarSesionViva, SesionCaducadaError } from './login';
 import { conNavegador, crearContextoAutenticado } from './navegador';
 import { rutaEditorActividad, SELECTORES } from './selectores';
@@ -118,24 +117,58 @@ async function extraerUna(
 }
 
 /**
- * Lee la vista previa de la pregunta y, si llega a renderizarse, la de su
- * solución. No hace falta pulsar nada: la pestaña "Solución" ya está
- * seleccionada por defecto. El panel de soluciones no siempre existe —en
- * Matemáticas no llega a renderizarse—, así que aquí no se espera con
- * `waitFor`: consultarlo directamente y tratar su ausencia como "sin
- * solución" evita penalizar esas actividades con el timeout completo.
+ * Captura la vista previa de la pregunta (ya visible) y sus dimensiones
+ * reales. Una captura fallida no debe tirar toda la actividad: se guarda sin
+ * preview visual y ya está. El tamaño real (`boundingBox`) hace falta para
+ * incrustarla en el Word sin deformarla: `docx` no lee las dimensiones del
+ * propio JPEG.
+ *
+ * La barra "Salir/Guardar" (`piePagina`) es `position: sticky`: en
+ * actividades con una vista previa alta (varias frases, muchas fichas...) su
+ * borde inferior cae en la misma región de pantalla donde esa barra está
+ * pintada, y la captura se la lleva por delante. Se oculta antes de capturar
+ * — no hace falta restaurarla, la siguiente actividad navega a una página
+ * nueva.
  */
-async function extraerBloqueCompleto(page: Page): Promise<{
-  preguntaHtml: string;
-  solucionHtml: string | null;
-  claseTipo: string | null;
-  capturaBase64: string | null;
-  capturaAncho: number | null;
-  capturaAlto: number | null;
-}> {
+async function capturarVistaPrevia(pregunta: Locator): Promise<Captura> {
+  try {
+    await pregunta
+      .page()
+      .locator(SELECTORES.editor.piePagina)
+      .evaluate((el) => {
+        (el as HTMLElement).style.visibility = 'hidden';
+      })
+      .catch(() => {
+        /* si no está, nada que ocultar */
+      });
+
+    const caja = await pregunta.first().boundingBox();
+    const buffer = await pregunta.first().screenshot({ type: 'jpeg', quality: CALIDAD_CAPTURA });
+    return {
+      capturaBase64: buffer.toString('base64'),
+      capturaAncho: caja ? Math.round(caja.width) : null,
+      capturaAlto: caja ? Math.round(caja.height) : null,
+    };
+  } catch {
+    return { capturaBase64: null, capturaAncho: null, capturaAlto: null };
+  }
+}
+
+/**
+ * Lee el tipo de plantilla, la captura visual y el HTML del ejercicio.
+ *
+ * El ejercicio existe dos veces: dentro de la vista previa (como lo ve el
+ * alumno, con el enunciado repetido y el orden desordenado) y dentro de
+ * "Soluciones" (limpio, sin el enunciado ni el desorden) — se prefiere este
+ * segundo, y solo se cae al de la vista previa si la actividad no tiene panel
+ * de soluciones (p. ej. Matemáticas). No hay que pulsar nada para verlo: la
+ * pestaña "Solución" ya está seleccionada por defecto.
+ */
+async function extraerBloqueCompleto(
+  page: Page,
+): Promise<{ claseTipo: string | null; ejercicioHtml: string | null } & Captura> {
   const pregunta = page.locator(SELECTORES.editor.vistaPreviaPregunta);
   await pregunta.waitFor({ state: 'visible', timeout: TIMEOUT_BLOQUE });
-  const preguntaHtml = await pregunta.first().evaluate((el) => el.innerHTML);
 
   const claseTipo = await page
     .locator(SELECTORES.editor.tipoPregunta)
@@ -143,35 +176,33 @@ async function extraerBloqueCompleto(page: Page): Promise<{
     .getAttribute('class')
     .catch(() => null);
 
-  // Una captura fallida no debe tirar toda la actividad: se guarda sin
-  // preview visual y ya está — el texto de abajo sigue siendo la fuente real.
-  // El tamaño real (`boundingBox`) hace falta para incrustarla en el Word sin
-  // deformarla: `docx` no lee las dimensiones del propio JPEG.
-  let capturaBase64: string | null = null;
-  let capturaAncho: number | null = null;
-  let capturaAlto: number | null = null;
-  try {
-    const caja = await pregunta.first().boundingBox();
-    const buffer = await pregunta.first().screenshot({ type: 'jpeg', quality: CALIDAD_CAPTURA });
-    capturaBase64 = buffer.toString('base64');
-    capturaAncho = caja ? Math.round(caja.width) : null;
-    capturaAlto = caja ? Math.round(caja.height) : null;
-  } catch {
-    /* sin preview visual; el resto de la actividad se extrae igual */
-  }
+  const captura = await capturarVistaPrevia(pregunta);
 
   const solucion = page.locator(SELECTORES.editor.vistaPreviaSolucion);
-  const solucionHtml =
-    (await solucion.count()) > 0 ? await solucion.first().evaluate((el) => el.innerHTML) : null;
+  const ejercicioSolucion =
+    (await solucion.count()) > 0
+      ? await solucion
+          .locator(SELECTORES.editor.ejercicio)
+          .first()
+          .evaluate((el) => el.innerHTML)
+          .catch(() => null)
+      : null;
+  const ejercicioHtml =
+    ejercicioSolucion ??
+    (await pregunta
+      .locator(SELECTORES.editor.ejercicio)
+      .first()
+      .evaluate((el) => el.innerHTML)
+      .catch(() => null));
 
-  return { preguntaHtml, solucionHtml, claseTipo, capturaBase64, capturaAncho, capturaAlto };
+  return { claseTipo, ejercicioHtml, ...captura };
 }
 
 /**
- * Igual que `extraerUna`, pero además lee las opciones y —cuando el tipo de
- * plantilla lo permite— la respuesta correcta, vía `analizarSolucion`. Un
- * fallo leyendo la vista previa/solución no descarta el enunciado ya leído:
- * se devuelve con `detalle: null`, igual que un enunciado no encontrado.
+ * Igual que `extraerUna`, pero además extrae el tipo de plantilla, una
+ * captura visual y el HTML del ejercicio — sin interpretar nada por tipo de
+ * plantilla, tal cual aparece en el backoffice. Un fallo leyendo la vista
+ * previa no descarta el enunciado ya leído.
  */
 async function extraerCompleta(
   page: Page,
@@ -182,9 +213,8 @@ async function extraerCompleta(
   const codigo = actividad.Name;
 
   const sinDatos = {
-    nombre: codigo,
     tipoPlantilla: 'Desconocido',
-    detalle: null,
+    ejercicioHtml: null,
     capturaBase64: null,
     capturaAncho: null,
     capturaAlto: null,
@@ -216,35 +246,60 @@ async function extraerCompleta(
     return { codigo, enunciadoHtml: '[SIN ENUNCIADO EN EL EDITOR]', ...sinDatos };
   }
 
-  // El nombre interno es una lectura barata y casi nunca falla; si falla, el
-  // código sirve igual de título en el Word.
-  const nombre = await page
-    .locator(SELECTORES.editor.nombreInterno)
-    .first()
-    .inputValue()
-    .then((valor) => valor || codigo)
-    .catch(() => codigo);
-
   try {
-    const { preguntaHtml, solucionHtml, claseTipo, capturaBase64, capturaAncho, capturaAlto } =
+    const { claseTipo, ejercicioHtml, capturaBase64, capturaAncho, capturaAlto } =
       await extraerBloqueCompleto(page);
-    const detalle = analizarSolucion(preguntaHtml, solucionHtml);
     const tipoPlantilla = nombreTipoPlantilla(claseTipo, (clase) =>
       canal.log(`[?] Tipo de plantilla sin traducir en ${codigo}: ${clase}`),
     );
 
-    // Solo se audita cuando SÍ había panel de soluciones y aun así no se
-    // reconoció ningún patrón: cuando el panel directamente no existe (p. ej.
-    // Matemáticas, Emparejar) el "sin_solucion" es el resultado esperado, no
-    // un caso a revisar.
-    if (detalle.patron === 'sin_solucion' && solucionHtml) {
-      canal.log(`[?] Patrón de respuesta no reconocido en ${codigo}: se guarda solo lo visible.`);
-    }
-
-    return { codigo, nombre, tipoPlantilla, enunciadoHtml, detalle, capturaBase64, capturaAncho, capturaAlto };
+    return {
+      codigo,
+      tipoPlantilla,
+      enunciadoHtml,
+      ejercicioHtml: ejercicioHtml ? sanearHtmlEnunciado(ejercicioHtml) : null,
+      capturaBase64,
+      capturaAncho,
+      capturaAlto,
+    };
   } catch {
     canal.log(`[⚠️] No se pudo leer la vista previa de la pregunta en ${codigo}.`);
-    return { codigo, enunciadoHtml, ...sinDatos, nombre };
+    return { codigo, enunciadoHtml, ...sinDatos };
+  }
+}
+
+/**
+ * Modo "captura": ni enunciado ni tipo, solo navega y captura la vista
+ * previa. Es el modo más ligero de los tres — pensado para revisar de un
+ * vistazo un lote grande sin esperar a leer nada de texto.
+ */
+async function extraerCaptura(
+  page: Page,
+  urlBase: string,
+  actividad: ActividadRef,
+  canal: CanalNdjson<unknown>,
+): Promise<ActividadCaptura> {
+  const codigo = actividad.Name;
+  const sinCaptura = { capturaBase64: null, capturaAncho: null, capturaAlto: null };
+
+  try {
+    await page.goto(`${urlBase}${rutaEditorActividad(actividad['GUID/ERP'])}`, {
+      waitUntil: 'domcontentloaded',
+    });
+    comprobarSesionViva(page);
+  } catch (e) {
+    if (e instanceof SesionCaducadaError) throw e;
+    canal.log(`[❌] Error de navegación en ${codigo}. Se continúa con la siguiente.`);
+    return { codigo, ...sinCaptura };
+  }
+
+  try {
+    const pregunta = page.locator(SELECTORES.editor.vistaPreviaPregunta);
+    await pregunta.waitFor({ state: 'visible', timeout: TIMEOUT_BLOQUE });
+    return { codigo, ...(await capturarVistaPrevia(pregunta)) };
+  } catch {
+    canal.log(`[⚠️] No se pudo capturar la vista previa de ${codigo}.`);
+    return { codigo, ...sinCaptura };
   }
 }
 
@@ -282,9 +337,9 @@ export async function extraerEnunciados(opciones: {
 
 /**
  * Igual que `extraerEnunciados`, pero en "modo completo": además del
- * enunciado, extrae las opciones y —cuando se puede saber— la respuesta
- * correcta de cada actividad. Ver `lib/publisher/analizarSolucion.ts` para
- * cómo se decide.
+ * enunciado, extrae el tipo de plantilla, una captura visual y el HTML del
+ * ejercicio de cada actividad — sin interpretar nada por tipo, tal cual
+ * aparece en el backoffice. Ver `extraerBloqueCompleto`.
  */
 export async function extraerActividadesCompletas(opciones: {
   plataforma: PlataformaId;
@@ -304,6 +359,33 @@ export async function extraerActividadesCompletas(opciones: {
     const context: BrowserContext = await crearContextoAutenticado(browser, storageState);
     const resultados = await ejecutarConPool(context, actividades, canal, (page, actividad) =>
       extraerCompleta(page, urlBase, actividad, canal),
+    );
+
+    canal.log(`Extracción completada. ${resultados.length} procesados.`);
+    return resultados;
+  });
+}
+
+/**
+ * Modo "captura": solo la vista previa visual de cada actividad, sin leer
+ * enunciado ni tipo de plantilla. Ver `extraerCaptura`.
+ */
+export async function extraerCapturas(opciones: {
+  plataforma: PlataformaId;
+  storageState: string;
+  actividades: ActividadRef[];
+  canal: CanalNdjson<ActividadCaptura[]>;
+}): Promise<ActividadCaptura[]> {
+  const { plataforma, storageState, actividades, canal } = opciones;
+  const urlBase = urlBaseDe(plataforma);
+  const total = actividades.length;
+
+  return conNavegador(async (browser) => {
+    canal.log(`Iniciando captura de ${total} actividades (${concurrencia(total)} en paralelo)...`);
+
+    const context: BrowserContext = await crearContextoAutenticado(browser, storageState);
+    const resultados = await ejecutarConPool(context, actividades, canal, (page, actividad) =>
+      extraerCaptura(page, urlBase, actividad, canal),
     );
 
     canal.log(`Extracción completada. ${resultados.length} procesados.`);
