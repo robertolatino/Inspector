@@ -23,7 +23,7 @@ const OPCIONES_CONTEXTO = {
  * (~200-300 MB) hasta que el contenedor moría por falta de memoria.
  */
 export async function conNavegador<T>(fn: (browser: Browser) => Promise<T>): Promise<T> {
-  const browser = await chromium.launch({ headless: true, args: ARGS_CHROMIUM });
+  const browser = await chromium.launch({ headless: false, args: ARGS_CHROMIUM });
   try {
     return await fn(browser);
   } finally {
