@@ -14,6 +14,8 @@ const TIMEOUT_TEXTAREA = 5_000;
  * solo el recorte del elemento, no la página), pero en un lote de cientos de
  * actividades cada KB cuenta para lo que se guarda en el navegador. */
 const CALIDAD_CAPTURA = 70;
+/** Margen de sobra al agrandar el viewport, para no dejarlo justo al límite. */
+const MARGEN_VIEWPORT = 40;
 
 /**
  * Pestañas en paralelo. Cada una es un Chromium tab dentro del mismo contexto,
@@ -129,11 +131,23 @@ async function extraerUna(
  * pintada, y la captura se la lleva por delante. Se oculta antes de capturar
  * — no hace falta restaurarla, la siguiente actividad navega a una página
  * nueva.
+ *
+ * El editor no hace scroll de la página: hace scroll de un contenedor interno
+ * (`overflow-y: auto`), así que una vista previa más alta que el viewport
+ * (p. ej. "Unir" con muchos pares, "Clasificar" con muchas palabras) no cabe
+ * entera en la ventana — Playwright solo puede capturar lo que está pintado
+ * dentro del viewport en ese momento, aunque el elemento "sepa" que mide más,
+ * así que el resto salía recortado y en blanco. Se agranda el viewport de esa
+ * pestaña cuando hace falta, antes de capturar; queda así para el resto de
+ * actividades que procese esa misma pestaña, lo cual no hace daño (una
+ * ventana más alta de lo necesario no cambia el recorte de una captura más
+ * pequeña).
  */
 async function capturarVistaPrevia(pregunta: Locator): Promise<Captura> {
   try {
-    await pregunta
-      .page()
+    const page = pregunta.page();
+
+    await page
       .locator(SELECTORES.editor.piePagina)
       .evaluate((el) => {
         (el as HTMLElement).style.visibility = 'hidden';
@@ -141,6 +155,19 @@ async function capturarVistaPrevia(pregunta: Locator): Promise<Captura> {
       .catch(() => {
         /* si no está, nada que ocultar */
       });
+
+    const cajaInicial = await pregunta.first().boundingBox();
+    if (cajaInicial) {
+      const vp = page.viewportSize();
+      const altoNecesario = Math.ceil(cajaInicial.y + cajaInicial.height + MARGEN_VIEWPORT);
+      const anchoNecesario = Math.ceil(cajaInicial.x + cajaInicial.width + MARGEN_VIEWPORT);
+      if (vp && (altoNecesario > vp.height || anchoNecesario > vp.width)) {
+        await page.setViewportSize({
+          width: Math.max(vp.width, anchoNecesario),
+          height: Math.max(vp.height, altoNecesario),
+        });
+      }
+    }
 
     const caja = await pregunta.first().boundingBox();
     const buffer = await pregunta.first().screenshot({ type: 'jpeg', quality: CALIDAD_CAPTURA });
